@@ -9,6 +9,7 @@ targets:
     platform: iOS
     sources:
       - Sources
+      - Resources
     info:
       path: Sources/Info.plist
       properties:

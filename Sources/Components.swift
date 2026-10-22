@@ -116,12 +116,13 @@ struct QuickLookView: UIViewControllerRepresentable {
 }
 
 struct BusyOverlay: View {
+    var text: String? = nil
     var body: some View {
         ZStack {
             Color.black.opacity(0.5).ignoresSafeArea()
             VStack(spacing: 12) {
                 ProgressView().tint(.white)
-                Text("جاري الاستيراد…").font(.subheadline).foregroundColor(.white)
+                Text(text ?? "جاري الاستيراد…").font(.subheadline).foregroundColor(.white)
             }
             .padding(26)
             .background(Color.cardBg2, in: RoundedRectangle(cornerRadius: 18))

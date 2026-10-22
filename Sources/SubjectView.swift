@@ -14,6 +14,7 @@ struct SubjectView: View {
     @State private var showSearch = false
     @State private var busy = false
     @State private var scrollTarget: UUID?
+    @State private var bulkUnit: PlayTarget?
 
     @State private var showPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
@@ -50,7 +51,7 @@ struct SubjectView: View {
                     }
                 }
             }
-            if busy { BusyOverlay() }
+            if busy { BusyOverlay(text: store.importStatus) }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
@@ -70,7 +71,7 @@ struct SubjectView: View {
         .sheet(isPresented: $showSearch) {
             SearchView(subjectID: subjectID) { id in playTarget = PlayTarget(id: id) }
         }
-        .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 30, matching: .videos)
+        .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 200, matching: .videos)
         .onChange(of: photoItems) { items in
             guard !items.isEmpty, let uid = targetUnit else { return }
             Task { await importPhotos(items, unitID: uid) }
@@ -86,6 +87,7 @@ struct SubjectView: View {
                 toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : ("تعذّر: " + (store.lastImportError ?? "استيراد الفيديو"))
             }
         }
+        .sheet(item: $bulkUnit) { t in BulkRenameView(unitID: t.id) }
         .sheet(item: $quizRun) { t in QuizRunnerView(unitID: t.id) }
         .sheet(item: $quizEdit) { t in QuizEditorView(unitID: t.id) }
         .toast($toastText)
@@ -251,6 +253,7 @@ struct SubjectView: View {
                 Menu {
                     Button { targetUnit = u.id; showPhotos = true } label: { Label("إضافة فيديو من الاستوديو", systemImage: "photo.on.rectangle") }
                     Button { targetUnit = u.id; showVideoImporter = true } label: { Label("إضافة فيديو من الملفات", systemImage: "folder") }
+                    Button { bulkUnit = PlayTarget(id: u.id) } label: { Label("تعديل عناوين الفيديوهات", systemImage: "text.badge.checkmark") }
                     Divider()
                     Button { quizEdit = PlayTarget(id: u.id) } label: { Label("أسئلة اختبار الفصل", systemImage: "checklist") }
                     Button { renameText = u.title; renameKind = .unit(u) } label: { Label("تغيير اسم الفصل", systemImage: "pencil") }
@@ -317,6 +320,24 @@ struct SubjectView: View {
     }
 
     private func lessonRow(_ l: Lesson, isFirst: Bool, isLast: Bool) -> some View {
+        HStack(spacing: 2) {
+            lessonButton(l, isFirst: isFirst, isLast: isLast)
+            Menu {
+                Button { renameText = l.title; renameKind = .lesson(l) } label: { Label("تعديل العنوان", systemImage: "pencil") }
+                Button { store.toggleDone(l) } label: {
+                    Label(l.isDone ? "إلغاء الإكمال" : "تعليم كمكتمل", systemImage: "checkmark.circle")
+                }
+                Button { store.moveLesson(l, by: -1) } label: { Label("نقل للأعلى", systemImage: "arrow.up") }
+                Button { store.moveLesson(l, by: 1) } label: { Label("نقل للأسفل", systemImage: "arrow.down") }
+                Button(role: .destructive) { lessonToDelete = l } label: { Label("حذف الدرس", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis").font(.body.bold()).foregroundColor(.dim)
+                    .frame(width: 34, height: 48).contentShape(Rectangle())
+            }
+        }
+    }
+
+    private func lessonButton(_ l: Lesson, isFirst: Bool, isLast: Bool) -> some View {
         Button { playTarget = PlayTarget(id: l.id) } label: {
             HStack(spacing: 12) {
                 ZStack(alignment: .bottom) {
@@ -392,7 +413,8 @@ struct SubjectView: View {
     private func importPhotos(_ items: [PhotosPickerItem], unitID: UUID) async {
         busy = true
         var urls: [URL] = []
-        for item in items {
+        for (idx, item) in items.enumerated() {
+            store.importStatus = "جاري تحميل \(idx + 1) من \(items.count)…"
             if let movie = try? await item.loadTransferable(type: MovieFile.self) { urls.append(movie.url) }
         }
         let n = await store.importLessons(urls, unitID: unitID)
@@ -400,5 +422,38 @@ struct SubjectView: View {
         photoItems = []
         expanded.insert(unitID)
         busy = false
+    }
+}
+
+
+struct BulkRenameView: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
+    let unitID: UUID
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+                List {
+                    ForEach(store.lessons(in: unitID)) { l in
+                        HStack(spacing: 12) {
+                            LessonThumb(url: store.url(for: l.fileName))
+                                .frame(width: 76, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            TextField("العنوان", text: Binding(
+                                get: { store.lesson(l.id)?.title ?? "" },
+                                set: { store.renameLesson(l, to: $0) }))
+                                .foregroundColor(.white)
+                        }
+                        .listRowBackground(Color.cardBg)
+                    }
+                }
+                .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+            }
+            .navigationTitle("تعديل العناوين")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("تم") { dismiss() } } }
+        }
     }
 }

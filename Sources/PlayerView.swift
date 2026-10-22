@@ -102,6 +102,8 @@ struct LessonPlayerView: View {
     @State private var sleepLabel: String?
     @State private var editingBookmark: Bookmark?
     @State private var detailTab: DetailTab = .lessons
+    @State private var renamingTitle = false
+    @State private var titleText = ""
     @FocusState private var notesFocused: Bool
     @State private var bookmarkText = ""
 
@@ -159,6 +161,14 @@ struct LessonPlayerView: View {
         .attachSources(showFiles: $showImporter, showPhotos: $showPhotos, busy: $busy,
                        subjectID: lesson?.subjectID ?? UUID(), lessonID: lessonID) { toastText = $0 }
         .sheet(item: $preview) { item in QuickLookView(url: item.url).ignoresSafeArea() }
+        .alert("تعديل عنوان الفيديو", isPresented: $renamingTitle) {
+            TextField("العنوان", text: $titleText)
+            Button("حفظ") {
+                let t = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty, let l = lesson { store.renameLesson(l, to: t); pm.nowTitle = t }
+            }
+            Button("إلغاء", role: .cancel) {}
+        }
         .alert("ملاحظة العلامة", isPresented: Binding(get: { editingBookmark != nil }, set: { if !$0 { editingBookmark = nil } })) {
             TextField("اكتب ملاحظة", text: $bookmarkText)
             Button("حفظ") { if let b = editingBookmark { store.updateBookmark(b, note: bookmarkText) }; editingBookmark = nil }
@@ -485,7 +495,10 @@ struct LessonPlayerView: View {
         Menu {
             Toggle("تشغيل الدرس التالي تلقائياً", isOn: $autoNext)
             Toggle("تكرار الدرس", isOn: $loopLesson)
-            Button { withAnimation { pm.fill.toggle() } } label: {
+            Button {
+                withAnimation { pm.fill.toggle() }
+                if let sid = lesson?.subjectID { store.setFill(pm.fill, subjectID: sid) }
+            } label: {
                 Label(pm.fill ? "احتواء الفيديو" : "ملء الشاشة بالفيديو", systemImage: "aspectratio")
             }
             if vSize != .compact {
@@ -516,6 +529,7 @@ struct LessonPlayerView: View {
             ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0], id: \.self) { r in
                 Button {
                     savedRate = r; pm.setRate(Float(r)); pokeControls()
+                    if let sid = lesson?.subjectID { store.setRate(r, subjectID: sid) }
                 } label: {
                     Label(rateLabel(r), systemImage: abs(savedRate - r) < 0.01 ? "checkmark" : "speedometer")
                 }
@@ -565,7 +579,14 @@ struct LessonPlayerView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     // header card
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(l.title).font(.title3.bold()).foregroundColor(.white)
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(l.title).font(.title3.bold()).foregroundColor(.white)
+                            Spacer(minLength: 0)
+                            Button { titleText = l.title; renamingTitle = true } label: {
+                                Image(systemName: "pencil").font(.footnote.bold()).foregroundColor(.dim)
+                                    .frame(width: 32, height: 32).background(Color.white.opacity(0.08), in: Circle())
+                            }
+                        }
                         HStack(spacing: 8) {
                             if let u = store.unit(l.unitID) {
                                 chip(u.title, icon: "rectangle.stack.fill")
@@ -784,6 +805,10 @@ struct LessonPlayerView: View {
         guard let l = store.lesson(id) else { return }
         store.setLast(id)
         zoom = 1; lastZoom = 1; pan = .zero; lastPan = .zero
+        let pr = store.prefs(for: l.subjectID)
+        if let r = pr.rate { savedRate = r }
+        pm.rate = Float(savedRate)
+        if let f = pr.fill { pm.fill = f }
         pm.nowTitle = l.title
         pm.nowSub = store.unit(l.unitID)?.title ?? ""
         loadSubtitles()

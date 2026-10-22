@@ -3,8 +3,8 @@ import UIKit
 
 extension Color {
     static let appBg = Color(red: 0.04, green: 0.04, blue: 0.065)
-    static let cardBg = Color(red: 0.095, green: 0.095, blue: 0.135)
-    static let cardBg2 = Color(red: 0.14, green: 0.14, blue: 0.20)
+    static let cardBg = Color(red: 0.07, green: 0.07, blue: 0.11).opacity(0.74)
+    static let cardBg2 = Color(red: 0.13, green: 0.13, blue: 0.20).opacity(0.88)
     static let accentBlue = Color(red: 0.49, green: 0.40, blue: 1.0)
     static let doneGreen = Color(red: 0.25, green: 0.80, blue: 0.48)
     static let dim = Color.white.opacity(0.62)
@@ -38,18 +38,23 @@ struct StarField: View {
     }
 }
 
+enum Nebula {
+    static let image: UIImage? = UIImage(named: "nebula.jpg")
+        ?? Bundle.main.path(forResource: "nebula", ofType: "jpg").flatMap { UIImage(contentsOfFile: $0) }
+}
+
 struct AppBackground: View {
     var body: some View {
         ZStack {
             Color.appBg
-            GeometryReader { g in
-                Circle().fill(Color(red: 0.45, green: 0.30, blue: 1.0).opacity(0.28))
-                    .frame(width: g.size.width * 0.9).blur(radius: 90)
-                    .offset(x: -g.size.width * 0.35, y: -g.size.width * 0.35)
-                Circle().fill(Color(red: 0.10, green: 0.60, blue: 0.85).opacity(0.18))
-                    .frame(width: g.size.width * 0.8).blur(radius: 90)
-                    .offset(x: g.size.width * 0.5, y: g.size.height * 0.55)
+            if let ui = Nebula.image {
+                GeometryReader { g in
+                    Image(uiImage: ui).resizable().scaledToFill()
+                        .frame(width: g.size.width, height: g.size.height).clipped()
+                }
             }
+            LinearGradient(colors: [Color.black.opacity(0.30), Color.black.opacity(0.62), Color.black.opacity(0.78)],
+                           startPoint: .top, endPoint: .bottom)
         }
         .ignoresSafeArea()
     }

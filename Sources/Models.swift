@@ -21,8 +21,14 @@ struct Lesson: Identifiable, Codable, Hashable {
     var fileName: String
     var position: Double = 0
     var duration: Double = 0
+    var lastWatched: Date? = nil
     var progress: Double { duration > 0 ? min(position / duration, 1) : 0 }
     var isDone: Bool { progress > 0.95 }
+}
+
+struct SubjectPrefs: Codable, Hashable {
+    var rate: Double?
+    var fill: Bool?
 }
 
 struct Bookmark: Identifiable, Codable, Hashable {
@@ -82,6 +88,8 @@ final class Store: ObservableObject {
     @Published var questions: [QuizQuestion] = []
     @Published var lessonNotes: [String: String] = [:]
     @Published var studyLog: [String: Double] = [:]
+    @Published var subjectPrefs: [String: SubjectPrefs] = [:]
+    @Published var importStatus: String?
     var lastImportError: String?
 
     private struct Library: Codable {
@@ -94,6 +102,7 @@ final class Store: ObservableObject {
         var questions: [QuizQuestion]?
         var lessonNotes: [String: String]?
         var studyLog: [String: Double]?
+        var subjectPrefs: [String: SubjectPrefs]?
     }
 
     // old v1 format (migration)
@@ -119,6 +128,7 @@ final class Store: ObservableObject {
             files = lib.files; lastLessonID = lib.lastLessonID
             bookmarks = lib.bookmarks ?? []; questions = lib.questions ?? []
             lessonNotes = lib.lessonNotes ?? [:]; studyLog = lib.studyLog ?? [:]
+            subjectPrefs = lib.subjectPrefs ?? [:]
             return
         }
         if let data = try? Data(contentsOf: oldURL),
@@ -144,7 +154,7 @@ final class Store: ObservableObject {
 
     func save() {
         let lib = Library(subjects: subjects, units: units, lessons: lessons, files: files, lastLessonID: lastLessonID,
-                      bookmarks: bookmarks, questions: questions, lessonNotes: lessonNotes, studyLog: studyLog)
+                      bookmarks: bookmarks, questions: questions, lessonNotes: lessonNotes, studyLog: studyLog, subjectPrefs: subjectPrefs)
         if let data = try? JSONEncoder().encode(lib) { try? data.write(to: libURL, options: .atomic) }
     }
 
@@ -316,7 +326,9 @@ final class Store: ObservableObject {
     func importLessons(_ urls: [URL], unitID: UUID) async -> Int {
         guard let u = unit(unitID) else { return 0 }
         var count = 0
-        for url in urls {
+        defer { importStatus = nil }
+        for (idx, url) in urls.enumerated() {
+            importStatus = "جاري استيراد \(idx + 1) من \(urls.count)…"
             var title = url.deletingPathExtension().lastPathComponent
             if Store.looksGenerated(title) { title = "درس \(lessons.filter { $0.unitID == unitID }.count + 1)" }
             let result = await Task.detached { () -> Result<String, Error> in
@@ -392,6 +404,7 @@ final class Store: ObservableObject {
     }
     func updateProgress(_ id: UUID, position: Double, duration: Double) {
         guard let i = lessons.firstIndex(where: { $0.id == id }) else { return }
+        if abs(lessons[i].position - position) > 0.5 || lessons[i].lastWatched == nil { lessons[i].lastWatched = Date() }
         lessons[i].position = position
         if duration.isFinite && duration > 0 { lessons[i].duration = duration }
         save()
@@ -446,6 +459,20 @@ final class Store: ObservableObject {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
     }()
     private func dayKey(_ d: Date) -> String { Store.dayFormatter.string(from: d) }
+    func minutes(daysAgo n: Int) -> Int {
+        guard let d = Calendar.current.date(byAdding: .day, value: -n, to: Date()) else { return 0 }
+        return Int((studyLog[dayKey(d)] ?? 0) / 60)
+    }
+    func recentLessons(limit: Int) -> [Lesson] {
+        Array(lessons.filter { $0.lastWatched != nil }.sorted { ($0.lastWatched ?? .distantPast) > ($1.lastWatched ?? .distantPast) }.prefix(limit))
+    }
+    func prefs(for sid: UUID) -> SubjectPrefs { subjectPrefs[sid.uuidString] ?? SubjectPrefs() }
+    func setRate(_ r: Double, subjectID sid: UUID) {
+        var p = prefs(for: sid); p.rate = r; subjectPrefs[sid.uuidString] = p; save()
+    }
+    func setFill(_ f: Bool, subjectID sid: UUID) {
+        var p = prefs(for: sid); p.fill = f; subjectPrefs[sid.uuidString] = p; save()
+    }
     func addStudy(seconds: Double) {
         let k = dayKey(Date())
         studyLog[k, default: 0] += seconds
