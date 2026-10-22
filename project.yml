@@ -16,6 +16,8 @@ targets:
         CFBundleDevelopmentRegion: ar
         UILaunchScreen: {}
         UIFileSharingEnabled: true
+        UIBackgroundModes:
+          - audio
         LSSupportsOpeningDocumentsInPlace: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

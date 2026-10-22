@@ -12,9 +12,11 @@ struct DuroosiApp: App {
 
     var body: some Scene {
         WindowGroup {
-            SubjectsView()
+            HomeView()
                 .environmentObject(store)
                 .environment(\.layoutDirection, .rightToLeft)
+                .preferredColorScheme(.dark)
+                .tint(.accentBlue)
         }
     }
 }

@@ -21,6 +21,7 @@ jobs:
 
       - name: Build (unsigned)
         run: |
+          set -o pipefail
           xcodebuild -project Duroosi.xcodeproj \
             -scheme Duroosi \
             -configuration Release \
@@ -29,7 +30,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build 2>&1 | tee build.log
+
+      - name: Publish build errors
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          grep -E "error:" build.log | sort -u | head -40 > errors.txt || true
+          [ -s errors.txt ] || tail -60 build.log > errors.txt
+          gh release delete buildlog --yes --cleanup-tag || true
+          gh release create buildlog errors.txt --title "build errors" --notes-file errors.txt --target ${{ github.sha }}
 
       - name: Package IPA
         run: |
