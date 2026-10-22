@@ -19,7 +19,6 @@ targets:
         UIFileSharingEnabled: true
         UIBackgroundModes:
           - audio
-        LSSupportsOpeningDocumentsInPlace: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

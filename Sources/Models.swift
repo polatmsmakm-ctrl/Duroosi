@@ -90,6 +90,13 @@ final class Store: ObservableObject {
     @Published var studyLog: [String: Double] = [:]
     @Published var subjectPrefs: [String: SubjectPrefs] = [:]
     @Published var importStatus: String?
+    @Published var logLines: [String] = []
+    private var logObs: NSObjectProtocol?
+    func log(_ s: String) {
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
+        logLines.append(f.string(from: Date()) + "  " + s)
+        if logLines.count > 120 { logLines.removeFirst(logLines.count - 120) }
+    }
     var lastImportError: String?
 
     private struct Library: Codable {
@@ -119,6 +126,10 @@ final class Store: ObservableObject {
     init() {
         try? FileManager.default.createDirectory(at: Store.mediaDir, withIntermediateDirectories: true)
         load()
+        logObs = NotificationCenter.default.addObserver(forName: Notification.Name("duroosi.log"), object: nil, queue: .main) { [weak self] n in
+            let s = (n.object as? String) ?? ""
+            Task { @MainActor in self?.log(s) }
+        }
     }
 
     private func load() {
@@ -331,8 +342,10 @@ final class Store: ObservableObject {
     func importFolder(_ folder: URL, subjectID: UUID, unitID: UUID?) async -> Int {
         let scoped = folder.startAccessingSecurityScopedResource()
         defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
+        log("استيراد مجلد: \(folder.lastPathComponent) — صلاحية=\(scoped)")
         let groups = await Task.detached { Store.scanFolder(folder) }.value
         let total = groups.reduce(0) { $0 + $1.1.count }
+        log("لقيت \(groups.count) مجموعة و\(total) فيديو")
         guard total > 0 else { lastImportError = "ما لقيت فيديوهات داخل المجلد"; return 0 }
         defer { importStatus = nil }
         var done = 0
@@ -353,7 +366,7 @@ final class Store: ObservableObject {
                     Result { try Store.copyIn(url) }
                 }.value
                 switch result {
-                case .failure(let e): lastImportError = describe(e)
+                case .failure(let e): lastImportError = describe(e); log("فشل \(url.lastPathComponent): \(describe(e))")
                 case .success(let fileName):
                     lessons.append(Lesson(unitID: uid, subjectID: subjectID, title: title, fileName: fileName))
                     count += 1
@@ -361,6 +374,7 @@ final class Store: ObservableObject {
             }
             save()
         }
+        log("انتهى استيراد المجلد: \(count) من \(total)")
         return count
     }
 

@@ -90,8 +90,9 @@ struct SubjectView: View {
         }
         .documentPicker(isPresented: $showFolderImporter, types: [.folder], asCopy: false) { urls in
             let uid = targetUnit
+            busy = true
+            toastText = "وصل المجلد، جاري القراءة…"
             Task {
-                busy = true
                 var n = 0
                 for u in urls { n += await store.importFolder(u, subjectID: subjectID, unitID: uid) }
                 busy = false

@@ -131,6 +131,10 @@ struct BusyOverlay: View {
 }
 
 
+func dlog(_ s: String) {
+    NotificationCenter.default.post(name: Notification.Name("duroosi.log"), object: s)
+}
+
 struct DocPickerHost: UIViewControllerRepresentable {
     @Binding var isPresented: Bool
     let types: [UTType]
@@ -147,11 +151,12 @@ struct DocPickerHost: UIViewControllerRepresentable {
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: asCopy)
             picker.allowsMultipleSelection = true
             picker.delegate = c
+            dlog("فتح نافذة الاختيار (\(types.map { $0.identifier }.joined(separator: ",")), نسخ=\(asCopy))")
             DispatchQueue.main.async {
                 var top: UIViewController? = vc.view.window?.rootViewController
                     ?? UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }.first
                 while let p = top?.presentedViewController { top = p }
-                if let top { top.present(picker, animated: true) } else { c.showing = false; isPresented = false }
+                if let top { top.present(picker, animated: true) } else { dlog("ما لقيت شاشة أعرض عليها النافذة"); c.showing = false; isPresented = false }
             }
         }
     }
@@ -159,11 +164,13 @@ struct DocPickerHost: UIViewControllerRepresentable {
         var parent: DocPickerHost?
         var showing = false
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            dlog("وصل اختيار: \(urls.count) عنصر — " + urls.map { $0.lastPathComponent }.prefix(5).joined(separator: " | "))
             showing = false
             parent?.isPresented = false
             parent?.onPick(urls)
         }
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            dlog("أُلغي الاختيار")
             showing = false
             parent?.isPresented = false
         }

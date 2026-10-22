@@ -382,6 +382,18 @@ struct SettingsTab: View {
                     }
                     .listRowBackground(Color.cardBg)
 
+                    Section {
+                        if store.logLines.isEmpty {
+                            Text("ما فيه أحداث بعد").font(.footnote).foregroundColor(.dim)
+                        } else {
+                            ForEach(Array(store.logLines.suffix(25).enumerated()), id: \.offset) { _, l in
+                                Text(l).font(.caption2.monospaced()).foregroundColor(.dim)
+                            }
+                            Button("نسخ السجل") { UIPasteboard.general.string = store.logLines.joined(separator: "\n") }
+                        }
+                    } header: { Text("سجل الاستيراد (للتشخيص)") }
+                    .listRowBackground(Color.cardBg)
+
                     Section("المكتبة") {
                         LabeledContent("المواد", value: "\(store.subjects.count)")
                         LabeledContent("الفصول", value: "\(store.units.count)")
