@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import QuickLook
+import AVKit
 import CoreTransferable
 import UniformTypeIdentifiers
 
@@ -125,4 +126,71 @@ struct BusyOverlay: View {
             .background(Color.cardBg2, in: RoundedRectangle(cornerRadius: 18))
         }
     }
+}
+
+
+struct DocumentPicker: UIViewControllerRepresentable {
+    let types: [UTType]
+    var asCopy: Bool = true
+    let onPick: ([URL]) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(onPick) }
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let p = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: asCopy)
+        p.allowsMultipleSelection = true
+        p.delegate = context.coordinator
+        return p
+    }
+    func updateUIViewController(_ vc: UIDocumentPickerViewController, context: Context) {}
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: ([URL]) -> Void
+        init(_ f: @escaping ([URL]) -> Void) { onPick = f }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { onPick(urls) }
+    }
+}
+
+extension View {
+    func documentPicker(isPresented: Binding<Bool>, types: [UTType], asCopy: Bool = true,
+                        onPick: @escaping ([URL]) -> Void) -> some View {
+        sheet(isPresented: isPresented) {
+            DocumentPicker(types: types, asCopy: asCopy) { urls in
+                isPresented.wrappedValue = false
+                onPick(urls)
+            }
+            .ignoresSafeArea()
+        }
+    }
+    func toast(_ text: Binding<String?>) -> some View { modifier(ToastModifier(text: text)) }
+}
+
+struct ToastModifier: ViewModifier {
+    @Binding var text: String?
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .bottom) {
+            if let t = text {
+                Text(t)
+                    .font(.subheadline.bold()).foregroundColor(.white)
+                    .padding(.horizontal, 18).padding(.vertical, 12)
+                    .background(Color.cardBg2, in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
+                    .padding(.bottom, 34)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .task(id: t) {
+                        try? await Task.sleep(nanoseconds: 2_400_000_000)
+                        withAnimation { text = nil }
+                    }
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: text)
+    }
+}
+
+struct AirPlayButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let v = AVRoutePickerView()
+        v.tintColor = .white
+        v.activeTintColor = .systemBlue
+        v.prioritizesVideoDevices = true
+        return v
+    }
+    func updateUIView(_ v: AVRoutePickerView, context: Context) {}
 }

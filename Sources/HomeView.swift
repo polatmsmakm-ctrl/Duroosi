@@ -30,6 +30,8 @@ struct HomeView: View {
                         }
                         .padding(.top, 8)
 
+                        if !store.lessons.isEmpty { StatsCard() }
+
                         if let l = store.globalContinue(), let s = store.subject(l.subjectID) {
                             ContinuePill(title: l.title, subtitle: s.name) {
                                 playTarget = PlayTarget(id: l.id)
@@ -182,5 +184,31 @@ struct SubjectEditor: View {
                 else { colorIndex = store.subjects.count % Palette.gradients.count; icon = subjectIcons[store.subjects.count % subjectIcons.count] }
             }
         }
+    }
+}
+
+
+struct StatsCard: View {
+    @EnvironmentObject var store: Store
+    var body: some View {
+        let d = store.totalDone()
+        HStack(spacing: 0) {
+            stat("flame.fill", "\(store.streak())", "أيام متتالية", .orange)
+            Divider().background(Color.white.opacity(0.12)).frame(height: 40)
+            stat("clock.fill", "\(store.todayMinutes())", "دقيقة اليوم", .cyan)
+            Divider().background(Color.white.opacity(0.12)).frame(height: 40)
+            stat("checkmark.circle.fill", "\(d.done)/\(d.total)", "دروس مكتملة", .doneGreen)
+        }
+        .padding(.vertical, 14)
+        .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
+    }
+    private func stat(_ icon: String, _ value: String, _ label: String, _ color: Color) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon).foregroundColor(color)
+            Text(value).font(.title3.bold()).foregroundColor(.white)
+            Text(label).font(.caption2).foregroundColor(.dim)
+        }
+        .frame(maxWidth: .infinity)
     }
 }

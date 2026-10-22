@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import AVKit
 import UniformTypeIdentifiers
 
 final class PlayerModel: ObservableObject {
@@ -11,6 +12,9 @@ final class PlayerModel: ObservableObject {
     var rate: Float = 1
     var onProgress: ((Double, Double) -> Void)?
     var onEnd: (() -> Void)?
+    var onWatch: ((Double) -> Void)?
+    var pip: AVPictureInPictureController?
+    private var pendingWatch: Double = 0
 
     private var timeObs: Any?
     private var endObs: NSObjectProtocol?
@@ -24,6 +28,10 @@ final class PlayerModel: ObservableObject {
             let s = t.seconds
             if s.isFinite { self.current = s }
             if abs(s - self.lastSave) >= 3 { self.lastSave = s; self.flush() }
+            if self.isPlaying {
+                self.pendingWatch += 0.5
+                if self.pendingWatch >= 10 { self.onWatch?(self.pendingWatch); self.pendingWatch = 0 }
+            }
         }
         tcObs = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             DispatchQueue.main.async {
@@ -83,7 +91,13 @@ final class PlayerModel: ObservableObject {
         rate = r
         if player.timeControlStatus != .paused { player.rate = r }
     }
-    func stop() { flush(); player.pause(); player.replaceCurrentItem(with: nil) }
+    func stop() {
+        flush()
+        if pendingWatch > 1 { onWatch?(pendingWatch) }
+        pendingWatch = 0
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+    }
 }
 
 final class PlayerUIView: UIView {
@@ -92,12 +106,17 @@ final class PlayerUIView: UIView {
 }
 
 struct PlayerLayerView: UIViewRepresentable {
-    let player: AVPlayer
+    let model: PlayerModel
     func makeUIView(context: Context) -> PlayerUIView {
         let v = PlayerUIView()
         v.backgroundColor = .black
-        v.playerLayer.player = player
+        v.playerLayer.player = model.player
         v.playerLayer.videoGravity = .resizeAspect
+        if AVPictureInPictureController.isPictureInPictureSupported() {
+            let c = AVPictureInPictureController(playerLayer: v.playerLayer)
+            c?.canStartPictureInPictureAutomaticallyFromInline = true
+            model.pip = c
+        }
         return v
     }
     func updateUIView(_ v: PlayerUIView, context: Context) {}
@@ -124,6 +143,12 @@ struct LessonPlayerView: View {
     @State private var showImporter = false
     @State private var busy = false
     @State private var preview: IdentURL?
+    @AppStorage("autoNext") private var autoNext = true
+    @State private var toastText: String?
+    @State private var sleepTask: Task<Void, Never>?
+    @State private var sleepLabel: String?
+    @State private var editingBookmark: Bookmark?
+    @State private var bookmarkText = ""
 
     init(lessonID: UUID) { _lessonID = State(initialValue: lessonID) }
 
@@ -146,8 +171,9 @@ struct LessonPlayerView: View {
         .onAppear {
             pm.rate = Float(savedRate)
             pm.onProgress = { pos, dur in store.updateProgress(lessonID, position: pos, duration: dur) }
+            pm.onWatch = { secs in store.addStudy(seconds: secs) }
             pm.onEnd = {
-                if let n = store.nextLesson(after: lessonID) { play(n.id) }
+                if autoNext, let n = store.nextLesson(after: lessonID) { play(n.id) }
                 else { showControls = true }
             }
             play(lessonID)
@@ -155,20 +181,32 @@ struct LessonPlayerView: View {
         .onDisappear {
             pm.stop()
             hideTask?.cancel()
+            sleepTask?.cancel()
             setOrientation(.portrait)
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            guard case .success(let urls) = result, !urls.isEmpty, let l = lesson else { return }
-            Task { busy = true; await store.importFiles(urls, subjectID: l.subjectID, lessonID: l.id); busy = false }
+        .documentPicker(isPresented: $showImporter, types: [.item]) { urls in
+            guard let l = lesson else { return }
+            Task {
+                busy = true
+                let n = await store.importFiles(urls, subjectID: l.subjectID, lessonID: l.id)
+                busy = false
+                toastText = n > 0 ? "تم إرفاق \(n) ملف ✓" : "تعذّر إرفاق الملف"
+            }
         }
         .sheet(item: $preview) { item in QuickLookView(url: item.url).ignoresSafeArea() }
+        .alert("ملاحظة العلامة", isPresented: Binding(get: { editingBookmark != nil }, set: { if !$0 { editingBookmark = nil } })) {
+            TextField("اكتب ملاحظة", text: $bookmarkText)
+            Button("حفظ") { if let b = editingBookmark { store.updateBookmark(b, note: bookmarkText) }; editingBookmark = nil }
+            Button("إلغاء", role: .cancel) { editingBookmark = nil }
+        }
+        .toast($toastText)
     }
 
     // MARK: video
     private var videoArea: some View {
         ZStack {
             Color.black
-            PlayerLayerView(player: pm.player)
+            PlayerLayerView(model: pm)
 
             HStack(spacing: 0) {
                 Color.clear.contentShape(Rectangle())
@@ -202,6 +240,25 @@ struct LessonPlayerView: View {
                 HStack {
                     Button { dismiss() } label: { circleIcon("xmark") }
                     Spacer()
+                    AirPlayButton().frame(width: 34, height: 34)
+                        .background(Color.black.opacity(0.45), in: Circle())
+                    if pm.pip != nil {
+                        Button { togglePiP() } label: { circleIcon("pip.enter") }
+                    }
+                    Menu {
+                        Toggle("تشغيل الدرس التالي تلقائياً", isOn: $autoNext)
+                        Divider()
+                        Section("مؤقت النوم") {
+                            Button { startSleep(0) } label: { Label("إيقاف المؤقت", systemImage: "moon.zzz") }
+                            ForEach([15, 30, 45, 60], id: \.self) { m in
+                                Button { startSleep(m) } label: { Label("\(m) دقيقة", systemImage: "moon") }
+                            }
+                        }
+                    } label: {
+                        ZStack {
+                            circleIcon(sleepLabel == nil ? "gearshape.fill" : "moon.fill")
+                        }
+                    }
                     Menu {
                         ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { r in
                             Button {
@@ -254,6 +311,10 @@ struct LessonPlayerView: View {
                         Text("\(formatTime(scrubbing ? scrubValue : pm.current)) / \(formatTime(pm.duration))")
                             .font(.caption.monospacedDigit()).foregroundColor(.white)
                         Spacer()
+                        Button { addBookmark() } label: {
+                            Image(systemName: "bookmark.fill").foregroundColor(.white)
+                        }
+                        .padding(.trailing, 14)
                         Button { toggleFullscreen() } label: {
                             Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                                 .foregroundColor(.white)
@@ -296,6 +357,50 @@ struct LessonPlayerView: View {
                                 .padding(.horizontal, 14).padding(.vertical, 8)
                                 .background(Color.cardBg2, in: Capsule())
                         }
+                    }
+
+                    // bookmarks
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("العلامات").font(.headline).foregroundColor(.white)
+                            Spacer()
+                            Button { addBookmark() } label: {
+                                Label("علامة هنا", systemImage: "bookmark.fill").font(.footnote.bold())
+                            }
+                        }
+                        let bms = store.bookmarks(of: l.id)
+                        if bms.isEmpty {
+                            Text("أضف علامات على اللحظات المهمة في الفيديو للرجوع لها بسرعة").font(.footnote).foregroundColor(.dim)
+                        }
+                        ForEach(bms) { b in
+                            Button { pm.seek(to: b.time); pm.player.play(); pm.player.rate = pm.rate; pokeControls() } label: {
+                                HStack(spacing: 12) {
+                                    Text(formatTime(b.time)).font(.footnote.bold().monospacedDigit()).foregroundColor(.white)
+                                        .padding(.horizontal, 10).padding(.vertical, 6)
+                                        .background(Color.accentBlue, in: Capsule())
+                                    Text(b.note.isEmpty ? "علامة" : b.note).font(.subheadline).foregroundColor(.white).multilineTextAlignment(.leading)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(10)
+                                .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button { bookmarkText = b.note; editingBookmark = b } label: { Label("تعديل الملاحظة", systemImage: "pencil") }
+                                Button(role: .destructive) { store.deleteBookmark(b) } label: { Label("حذف", systemImage: "trash") }
+                            }
+                        }
+                    }
+
+                    // notes
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("ملاحظاتي").font(.headline).foregroundColor(.white)
+                        TextEditor(text: Binding(get: { store.note(for: l.id) }, set: { store.setNote($0, for: l.id) }))
+                            .scrollContentBackground(.hidden)
+                            .foregroundColor(.white)
+                            .frame(minHeight: 110)
+                            .padding(8)
+                            .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
 
                     // lesson files
@@ -404,6 +509,33 @@ struct LessonPlayerView: View {
         Task {
             try? await Task.sleep(nanoseconds: 700_000_000)
             withAnimation { flash = nil }
+        }
+    }
+
+    private func addBookmark() {
+        guard let l = lesson else { return }
+        store.addBookmark(lessonID: l.id, time: pm.current, note: "")
+        haptic(.medium)
+        toastText = "تمت إضافة علامة عند \(formatTime(pm.current)) ✓"
+    }
+
+    private func togglePiP() {
+        guard let c = pm.pip else { return }
+        if c.isPictureInPictureActive { c.stopPictureInPicture() } else { c.startPictureInPicture() }
+    }
+
+    private func startSleep(_ minutes: Int) {
+        sleepTask?.cancel()
+        guard minutes > 0 else { sleepLabel = nil; toastText = "تم إيقاف مؤقت النوم"; return }
+        sleepLabel = "\(minutes)"
+        toastText = "سيتوقف الفيديو بعد \(minutes) دقيقة"
+        sleepTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(minutes) * 60 * 1_000_000_000)
+            if !Task.isCancelled {
+                pm.player.pause()
+                sleepLabel = nil
+                toastText = "انتهى مؤقت النوم"
+            }
         }
     }
 

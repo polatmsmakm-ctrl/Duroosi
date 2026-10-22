@@ -19,6 +19,9 @@ struct SubjectView: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var targetUnit: UUID?
     @State private var showVideoImporter = false
+    @State private var quizRun: PlayTarget?
+    @State private var quizEdit: PlayTarget?
+    @State private var toastText: String?
 
     @State private var renameKind: RenameKind?
     @State private var renameText = ""
@@ -63,12 +66,20 @@ struct SubjectView: View {
             guard !items.isEmpty, let uid = targetUnit else { return }
             Task { await importPhotos(items, unitID: uid) }
         }
-        .fileImporter(isPresented: $showVideoImporter,
-                      allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie],
-                      allowsMultipleSelection: true) { result in
-            guard case .success(let urls) = result, !urls.isEmpty, let uid = targetUnit else { return }
-            Task { busy = true; await store.importLessons(urls, unitID: uid); busy = false; expanded.insert(uid) }
+        .documentPicker(isPresented: $showVideoImporter,
+                        types: [.movie, .video, .mpeg4Movie, .quickTimeMovie], asCopy: false) { urls in
+            guard let uid = targetUnit else { return }
+            Task {
+                busy = true
+                let n = await store.importLessons(urls, unitID: uid)
+                busy = false
+                expanded.insert(uid)
+                toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : "تعذّر استيراد الفيديو"
+            }
         }
+        .sheet(item: $quizRun) { t in QuizRunnerView(unitID: t.id) }
+        .sheet(item: $quizEdit) { t in QuizEditorView(unitID: t.id) }
+        .toast($toastText)
         .alert(renameTitle, isPresented: Binding(get: { renameKind != nil }, set: { if !$0 { renameKind = nil } })) {
             TextField("الاسم", text: $renameText)
             Button("حفظ") { commitRename() }
@@ -196,6 +207,7 @@ struct SubjectView: View {
                     Button { targetUnit = u.id; showPhotos = true } label: { Label("إضافة فيديو من الاستوديو", systemImage: "photo.on.rectangle") }
                     Button { targetUnit = u.id; showVideoImporter = true } label: { Label("إضافة فيديو من الملفات", systemImage: "folder") }
                     Divider()
+                    Button { quizEdit = PlayTarget(id: u.id) } label: { Label("أسئلة اختبار الوحدة", systemImage: "checklist") }
                     Button { renameText = u.title; renameKind = .unit(u) } label: { Label("تغيير اسم الوحدة", systemImage: "pencil") }
                     Button { store.moveUnit(u, by: -1) } label: { Label("نقل للأعلى", systemImage: "arrow.up") }
                     Button { store.moveUnit(u, by: 1) } label: { Label("نقل للأسفل", systemImage: "arrow.down") }
@@ -216,6 +228,8 @@ struct SubjectView: View {
                     ForEach(Array(ls.enumerated()), id: \.element.id) { idx, l in
                         lessonRow(l, isFirst: idx == 0, isLast: idx == ls.count - 1)
                     }
+                    Divider().background(Color.white.opacity(0.12)).padding(.vertical, 4)
+                    quizRow(u)
                 }
                 .padding(.horizontal, 14)
                 .padding(.bottom, 10)
@@ -224,6 +238,29 @@ struct SubjectView: View {
         }
         .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
+    }
+
+    private func quizRow(_ u: CourseUnit) -> some View {
+        let n = store.questions(of: u.id).count
+        return Button {
+            if n == 0 { quizEdit = PlayTarget(id: u.id) } else { quizRun = PlayTarget(id: u.id) }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "checklist")
+                    .font(.footnote.bold()).foregroundColor(.white)
+                    .frame(width: 28, height: 28)
+                    .background(Color.doneGreen.opacity(0.85), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("اختبار مراجعة الوحدة").font(.subheadline.weight(.medium)).foregroundColor(.white)
+                    Text(n == 0 ? "اضغط لإضافة أسئلة" : "\(n) سؤال").font(.caption2).foregroundColor(.dim)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.left").font(.caption.bold()).foregroundColor(.dim)
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func lessonRow(_ l: Lesson, isFirst: Bool, isLast: Bool) -> some View {
@@ -292,7 +329,8 @@ struct SubjectView: View {
         for item in items {
             if let movie = try? await item.loadTransferable(type: MovieFile.self) { urls.append(movie.url) }
         }
-        await store.importLessons(urls, unitID: unitID)
+        let n = await store.importLessons(urls, unitID: unitID)
+        toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : "تعذّر استيراد الفيديو"
         photoItems = []
         expanded.insert(unitID)
         busy = false

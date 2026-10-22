@@ -25,6 +25,21 @@ struct Lesson: Identifiable, Codable, Hashable {
     var isDone: Bool { progress > 0.95 }
 }
 
+struct Bookmark: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var lessonID: UUID
+    var time: Double
+    var note: String
+}
+
+struct QuizQuestion: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var unitID: UUID
+    var text: String
+    var options: [String]
+    var correct: Int
+}
+
 struct FileAttachment: Identifiable, Codable, Hashable {
     var id = UUID()
     var subjectID: UUID
@@ -63,6 +78,10 @@ final class Store: ObservableObject {
     @Published var lessons: [Lesson] = []
     @Published var files: [FileAttachment] = []
     @Published var lastLessonID: UUID?
+    @Published var bookmarks: [Bookmark] = []
+    @Published var questions: [QuizQuestion] = []
+    @Published var lessonNotes: [String: String] = [:]
+    @Published var studyLog: [String: Double] = [:]
 
     private struct Library: Codable {
         var subjects: [Subject]
@@ -70,6 +89,10 @@ final class Store: ObservableObject {
         var lessons: [Lesson]
         var files: [FileAttachment]
         var lastLessonID: UUID?
+        var bookmarks: [Bookmark]?
+        var questions: [QuizQuestion]?
+        var lessonNotes: [String: String]?
+        var studyLog: [String: Double]?
     }
 
     // old v1 format (migration)
@@ -93,6 +116,8 @@ final class Store: ObservableObject {
            let lib = try? JSONDecoder().decode(Library.self, from: data) {
             subjects = lib.subjects; units = lib.units; lessons = lib.lessons
             files = lib.files; lastLessonID = lib.lastLessonID
+            bookmarks = lib.bookmarks ?? []; questions = lib.questions ?? []
+            lessonNotes = lib.lessonNotes ?? [:]; studyLog = lib.studyLog ?? [:]
             return
         }
         if let data = try? Data(contentsOf: oldURL),
@@ -117,7 +142,8 @@ final class Store: ObservableObject {
     }
 
     func save() {
-        let lib = Library(subjects: subjects, units: units, lessons: lessons, files: files, lastLessonID: lastLessonID)
+        let lib = Library(subjects: subjects, units: units, lessons: lessons, files: files, lastLessonID: lastLessonID,
+                      bookmarks: bookmarks, questions: questions, lessonNotes: lessonNotes, studyLog: studyLog)
         if let data = try? JSONEncoder().encode(lib) { try? data.write(to: libURL, options: .atomic) }
     }
 
@@ -184,6 +210,11 @@ final class Store: ObservableObject {
     func deleteSubject(_ s: Subject) {
         lessons.filter { $0.subjectID == s.id }.forEach { remove($0.fileName) }
         files.filter { $0.subjectID == s.id }.forEach { remove($0.fileName) }
+        let lids = Set(lessons.filter { $0.subjectID == s.id }.map { $0.id })
+        let uids = Set(units.filter { $0.subjectID == s.id }.map { $0.id })
+        bookmarks.removeAll { lids.contains($0.lessonID) }
+        lids.forEach { lessonNotes[$0.uuidString] = nil }
+        questions.removeAll { uids.contains($0.unitID) }
         lessons.removeAll { $0.subjectID == s.id }
         files.removeAll { $0.subjectID == s.id }
         units.removeAll { $0.subjectID == s.id }
@@ -206,6 +237,9 @@ final class Store: ObservableObject {
         lessons(in: u.id).forEach { remove($0.fileName) }
         files.filter { $0.lessonID.map(ids.contains) ?? false }.forEach { remove($0.fileName) }
         files.removeAll { $0.lessonID.map(ids.contains) ?? false }
+        bookmarks.removeAll { ids.contains($0.lessonID) }
+        ids.forEach { lessonNotes[$0.uuidString] = nil }
+        questions.removeAll { $0.unitID == u.id }
         lessons.removeAll { $0.unitID == u.id }
         units.removeAll { $0.id == u.id }
         save()
@@ -225,34 +259,48 @@ final class Store: ObservableObject {
         let ext = source.pathExtension
         let name = UUID().uuidString + (ext.isEmpty ? "" : "." + ext)
         let dest = mediaDir.appendingPathComponent(name)
-        try FileManager.default.copyItem(at: source, to: dest)
-        if source.path.hasPrefix(FileManager.default.temporaryDirectory.path) {
-            try? FileManager.default.removeItem(at: source)
+        let tmp = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+        if source.resolvingSymlinksInPath().path.hasPrefix(tmp) {
+            do { try FileManager.default.moveItem(at: source, to: dest) }
+            catch {
+                try FileManager.default.copyItem(at: source, to: dest)
+                try? FileManager.default.removeItem(at: source)
+            }
+        } else {
+            try FileManager.default.copyItem(at: source, to: dest)
         }
         return name
     }
 
-    func importLessons(_ urls: [URL], unitID: UUID) async {
-        guard let u = unit(unitID) else { return }
+    @discardableResult
+    func importLessons(_ urls: [URL], unitID: UUID) async -> Int {
+        guard let u = unit(unitID) else { return 0 }
+        var count = 0
         for url in urls {
             let title = url.deletingPathExtension().lastPathComponent
             let result = await Task.detached { try? Store.copyIn(url) }.value
             if let name = result {
                 lessons.append(Lesson(unitID: unitID, subjectID: u.subjectID, title: title, fileName: name))
+                count += 1
             }
         }
         save()
+        return count
     }
 
-    func importFiles(_ urls: [URL], subjectID: UUID, lessonID: UUID?) async {
+    @discardableResult
+    func importFiles(_ urls: [URL], subjectID: UUID, lessonID: UUID?) async -> Int {
+        var count = 0
         for url in urls {
             let title = url.lastPathComponent
             let result = await Task.detached { try? Store.copyIn(url) }.value
             if let name = result {
                 files.append(FileAttachment(subjectID: subjectID, lessonID: lessonID, title: title, fileName: name))
+                count += 1
             }
         }
         save()
+        return count
     }
 
     // MARK: lessons / files
@@ -264,6 +312,8 @@ final class Store: ObservableObject {
         remove(l.fileName)
         attachments(of: l.id).forEach { remove($0.fileName) }
         files.removeAll { $0.lessonID == l.id }
+        bookmarks.removeAll { $0.lessonID == l.id }
+        lessonNotes[l.id.uuidString] = nil
         lessons.removeAll { $0.id == l.id }
         if lastLessonID == l.id { lastLessonID = nil }
         save()
@@ -300,4 +350,54 @@ final class Store: ObservableObject {
         remove(f.fileName)
         files.removeAll { $0.id == f.id }; save()
     }
+
+    // MARK: bookmarks
+    func bookmarks(of lid: UUID) -> [Bookmark] { bookmarks.filter { $0.lessonID == lid }.sorted { $0.time < $1.time } }
+    func addBookmark(lessonID: UUID, time: Double, note: String) {
+        bookmarks.append(Bookmark(lessonID: lessonID, time: time, note: note)); save()
+    }
+    func updateBookmark(_ b: Bookmark, note: String) {
+        guard let i = bookmarks.firstIndex(where: { $0.id == b.id }) else { return }
+        bookmarks[i].note = note; save()
+    }
+    func deleteBookmark(_ b: Bookmark) { bookmarks.removeAll { $0.id == b.id }; save() }
+
+    // MARK: notes
+    func note(for lid: UUID) -> String { lessonNotes[lid.uuidString] ?? "" }
+    func setNote(_ text: String, for lid: UUID) {
+        lessonNotes[lid.uuidString] = text.isEmpty ? nil : text; save()
+    }
+
+    // MARK: quiz
+    func questions(of uid: UUID) -> [QuizQuestion] { questions.filter { $0.unitID == uid } }
+    func saveQuestion(_ q: QuizQuestion) {
+        if let i = questions.firstIndex(where: { $0.id == q.id }) { questions[i] = q } else { questions.append(q) }
+        save()
+    }
+    func deleteQuestion(_ q: QuizQuestion) { questions.removeAll { $0.id == q.id }; save() }
+
+    // MARK: study stats
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
+    }()
+    private func dayKey(_ d: Date) -> String { Store.dayFormatter.string(from: d) }
+    func addStudy(seconds: Double) {
+        let k = dayKey(Date())
+        studyLog[k, default: 0] += seconds
+        save()
+    }
+    func todayMinutes() -> Int { Int((studyLog[dayKey(Date())] ?? 0) / 60) }
+    func streak() -> Int {
+        let cal = Calendar.current
+        var d = Date()
+        var n = 0
+        if (studyLog[dayKey(d)] ?? 0) < 30, let y = cal.date(byAdding: .day, value: -1, to: d) { d = y }
+        while (studyLog[dayKey(d)] ?? 0) >= 30 {
+            n += 1
+            guard let y = cal.date(byAdding: .day, value: -1, to: d) else { break }
+            d = y
+        }
+        return n
+    }
+    func totalDone() -> (done: Int, total: Int) { (lessons.filter { $0.isDone }.count, lessons.count) }
 }

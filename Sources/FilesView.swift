@@ -10,6 +10,7 @@ struct FilesView: View {
     @State private var renaming: FileAttachment?
     @State private var text = ""
     @State private var busy = false
+    @State private var toastText: String?
 
     private var notes: [FileAttachment] { store.notes(of: subjectID) }
     private var lessonFiles: [FileAttachment] { store.files.filter { $0.subjectID == subjectID && $0.lessonID != nil } }
@@ -49,10 +50,15 @@ struct FilesView: View {
                     Button { showImporter = true } label: { Image(systemName: "plus.circle.fill") }
                 }
             }
-            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                guard case .success(let urls) = result, !urls.isEmpty else { return }
-                Task { busy = true; await store.importFiles(urls, subjectID: subjectID, lessonID: nil); busy = false }
+            .documentPicker(isPresented: $showImporter, types: [.item]) { urls in
+                Task {
+                    busy = true
+                    let n = await store.importFiles(urls, subjectID: subjectID, lessonID: nil)
+                    busy = false
+                    toastText = n > 0 ? "تم إرفاق \(n) ملف ✓" : "تعذّر إرفاق الملف"
+                }
             }
+            .toast($toastText)
             .sheet(item: $preview) { item in QuickLookView(url: item.url).ignoresSafeArea() }
             .alert("تغيير الاسم", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("الاسم", text: $text)
