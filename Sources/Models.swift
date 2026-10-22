@@ -299,6 +299,71 @@ final class Store: ObservableObject {
         return name
     }
 
+    nonisolated static let videoExts: Set<String> = ["mp4", "mov", "m4v", "3gp", "mpg", "mpeg"]
+
+    nonisolated static func scanFolder(_ folder: URL) -> [(String, [URL])] {
+        let fm = FileManager.default
+        func natural(_ a: URL, _ b: URL) -> Bool {
+            a.path.localizedStandardCompare(b.path) == .orderedAscending
+        }
+        func videos(in dir: URL) -> [URL] {
+            guard let en = fm.enumerator(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
+            var out: [URL] = []
+            for case let u as URL in en where videoExts.contains(u.pathExtension.lowercased()) { out.append(u) }
+            return out.sorted(by: natural)
+        }
+        let items = ((try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? [])
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        var result: [(String, [URL])] = []
+        let rootVids = items.filter { videoExts.contains($0.pathExtension.lowercased()) }
+        if !rootVids.isEmpty { result.append((folder.lastPathComponent, rootVids)) }
+        for u in items {
+            let isDir = (try? u.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if isDir {
+                let v = videos(in: u)
+                if !v.isEmpty { result.append((u.lastPathComponent, v)) }
+            }
+        }
+        return result
+    }
+
+    /// unitID != nil: كل الفيديوهات تنحط في هذا الفصل. nil: كل مجلد فرعي يصير فصل باسمه.
+    func importFolder(_ folder: URL, subjectID: UUID, unitID: UUID?) async -> Int {
+        let scoped = folder.startAccessingSecurityScopedResource()
+        defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
+        let groups = await Task.detached { Store.scanFolder(folder) }.value
+        let total = groups.reduce(0) { $0 + $1.1.count }
+        guard total > 0 else { lastImportError = "ما لقيت فيديوهات داخل المجلد"; return 0 }
+        defer { importStatus = nil }
+        var done = 0
+        var count = 0
+        var flat: [(String, [URL])] = groups
+        if unitID != nil { flat = [("", groups.flatMap { $0.1 })] }
+        for (name, urls) in flat {
+            let uid: UUID
+            if let u = unitID { uid = u }
+            else if let ex = units.first(where: { $0.subjectID == subjectID && $0.title == name }) { uid = ex.id }
+            else { uid = addUnit(subjectID: subjectID, title: name).id }
+            for url in urls {
+                done += 1
+                importStatus = "جاري استيراد \(done) من \(total)…"
+                var title = url.deletingPathExtension().lastPathComponent
+                if Store.looksGenerated(title) { title = "درس \(lessons.filter { $0.unitID == uid }.count + 1)" }
+                let result = await Task.detached { () -> Result<String, Error> in
+                    Result { try Store.copyIn(url) }
+                }.value
+                switch result {
+                case .failure(let e): lastImportError = describe(e)
+                case .success(let fileName):
+                    lessons.append(Lesson(unitID: uid, subjectID: subjectID, title: title, fileName: fileName))
+                    count += 1
+                }
+            }
+            save()
+        }
+        return count
+    }
+
     nonisolated static func looksGenerated(_ t: String) -> Bool {
         let h = t.replacingOccurrences(of: "-", with: "")
         if h.count >= 28, h.allSatisfy({ $0.isHexDigit }) { return true }

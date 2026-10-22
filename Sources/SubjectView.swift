@@ -15,6 +15,7 @@ struct SubjectView: View {
     @State private var busy = false
     @State private var scrollTarget: UUID?
     @State private var bulkUnit: PlayTarget?
+    @State private var showFolderImporter = false
 
     @State private var showPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
@@ -87,6 +88,17 @@ struct SubjectView: View {
                 toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : ("تعذّر: " + (store.lastImportError ?? "استيراد الفيديو"))
             }
         }
+        .documentPicker(isPresented: $showFolderImporter, types: [.folder], asCopy: false) { urls in
+            let uid = targetUnit
+            Task {
+                busy = true
+                var n = 0
+                for u in urls { n += await store.importFolder(u, subjectID: subjectID, unitID: uid) }
+                busy = false
+                if let uid { expanded.insert(uid) } else { expanded = Set(store.units(of: subjectID).map { $0.id }) }
+                toastText = n > 0 ? "تمت إضافة \(n) فيديو ✓" : ("تعذّر: " + (store.lastImportError ?? "استيراد المجلد"))
+            }
+        }
         .sheet(item: $bulkUnit) { t in BulkRenameView(unitID: t.id) }
         .sheet(item: $quizRun) { t in QuizRunnerView(unitID: t.id) }
         .sheet(item: $quizEdit) { t in QuizEditorView(unitID: t.id) }
@@ -157,6 +169,15 @@ struct SubjectView: View {
                             .padding(.horizontal, 12).padding(.vertical, 7)
                             .background(Color.cardBg, in: Capsule())
                     }
+                }
+                Button {
+                    targetUnit = nil
+                    showFolderImporter = true
+                } label: {
+                    Label("مجلد", systemImage: "folder.badge.plus")
+                        .font(.footnote.bold()).foregroundColor(.accentBlue)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Color.cardBg, in: Capsule())
                 }
                 Button {
                     renameText = ""
@@ -253,6 +274,7 @@ struct SubjectView: View {
                 Menu {
                     Button { targetUnit = u.id; showPhotos = true } label: { Label("إضافة فيديو من الاستوديو", systemImage: "photo.on.rectangle") }
                     Button { targetUnit = u.id; showVideoImporter = true } label: { Label("إضافة فيديو من الملفات", systemImage: "folder") }
+                    Button { targetUnit = u.id; showFolderImporter = true } label: { Label("إضافة مجلد كامل", systemImage: "folder.badge.plus") }
                     Button { bulkUnit = PlayTarget(id: u.id) } label: { Label("تعديل عناوين الفيديوهات", systemImage: "text.badge.checkmark") }
                     Divider()
                     Button { quizEdit = PlayTarget(id: u.id) } label: { Label("أسئلة اختبار الفصل", systemImage: "checklist") }
@@ -276,6 +298,7 @@ struct SubjectView: View {
                     Menu {
                         Button { targetUnit = u.id; showPhotos = true } label: { Label("من الاستوديو", systemImage: "photo.on.rectangle") }
                         Button { targetUnit = u.id; showVideoImporter = true } label: { Label("من الملفات", systemImage: "folder") }
+                        Button { targetUnit = u.id; showFolderImporter = true } label: { Label("مجلد كامل", systemImage: "folder.badge.plus") }
                     } label: {
                         Label("إضافة فيديوهات لهذا الفصل", systemImage: "plus.circle.fill")
                             .font(.subheadline.bold()).foregroundColor(.accentBlue)
