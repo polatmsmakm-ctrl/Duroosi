@@ -101,6 +101,8 @@ struct LessonPlayerView: View {
     @State private var sleepTask: Task<Void, Never>?
     @State private var sleepLabel: String?
     @State private var editingBookmark: Bookmark?
+    @State private var detailTab: DetailTab = .lessons
+    @FocusState private var notesFocused: Bool
     @State private var bookmarkText = ""
 
     init(lessonID: UUID) { _lessonID = State(initialValue: lessonID) }
@@ -536,109 +538,202 @@ struct LessonPlayerView: View {
     }
 
     // MARK: details
+    private enum DetailTab: String, CaseIterable {
+        case lessons = "الدروس", notes = "ملاحظاتي", marks = "العلامات", files = "الملفات"
+        var icon: String {
+            switch self {
+            case .lessons: return "list.bullet.rectangle.portrait.fill"
+            case .notes: return "note.text"
+            case .marks: return "bookmark.fill"
+            case .files: return "paperclip"
+            }
+        }
+    }
+
+    private func tabCount(_ t: DetailTab, _ l: Lesson) -> Int {
+        switch t {
+        case .lessons: return store.lessons(in: l.unitID).count
+        case .notes: return store.note(for: l.id).isEmpty ? 0 : 1
+        case .marks: return store.bookmarks(of: l.id).count
+        case .files: return store.attachments(of: l.id).count
+        }
+    }
+
     private var details: some View {
         ScrollView {
             if let l = lesson {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 16) {
+                    // header card
+                    VStack(alignment: .leading, spacing: 10) {
                         Text(l.title).font(.title3.bold()).foregroundColor(.white)
-                        HStack(spacing: 10) {
+                        HStack(spacing: 8) {
                             if let u = store.unit(l.unitID) {
-                                Text(u.title).font(.footnote).foregroundColor(.dim)
+                                chip(u.title, icon: "rectangle.stack.fill")
                             }
-                            if pm.duration > 0 {
-                                Text("• مدة الدرس \(formatTime(pm.duration))").font(.footnote).foregroundColor(.dim)
+                            if pm.duration > 0 { chip(formatTime(pm.duration), icon: "clock.fill") }
+                            Spacer(minLength: 0)
+                            Button { store.toggleDone(l); haptic() } label: {
+                                Label(l.isDone ? "تمت المشاهدة" : "تعليم كمكتمل", systemImage: l.isDone ? "checkmark.circle.fill" : "circle")
+                                    .font(.caption.bold())
+                                    .foregroundColor(l.isDone ? .doneGreen : .white)
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .background((l.isDone ? Color.doneGreen.opacity(0.18) : Color.white.opacity(0.1)), in: Capsule())
                             }
-                        }
-                        Button { store.toggleDone(l) ; haptic() } label: {
-                            Label(l.isDone ? "تمت المشاهدة" : "تعليم كمكتمل", systemImage: l.isDone ? "checkmark.circle.fill" : "circle")
-                                .font(.footnote.bold())
-                                .foregroundColor(l.isDone ? .doneGreen : .white)
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(Color.cardBg2, in: Capsule())
                         }
                     }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
 
-                    // bookmarks
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("العلامات").font(.headline).foregroundColor(.white)
-                            Spacer()
-                            Button { addBookmark() } label: {
-                                Label("علامة هنا", systemImage: "bookmark.fill").font(.footnote.bold())
-                            }
-                        }
-                        let bms = store.bookmarks(of: l.id)
-                        if bms.isEmpty {
-                            Text("أضف علامات على اللحظات المهمة في الفيديو للرجوع لها بسرعة").font(.footnote).foregroundColor(.dim)
-                        }
-                        ForEach(bms) { b in
-                            Button { pm.seek(to: b.time); pm.player.play(); pm.player.rate = pm.rate; pokeControls() } label: {
-                                HStack(spacing: 12) {
-                                    Text(formatTime(b.time)).font(.footnote.bold().monospacedDigit()).foregroundColor(.white)
-                                        .padding(.horizontal, 10).padding(.vertical, 6)
-                                        .background(Color.accentBlue, in: Capsule())
-                                    Text(b.note.isEmpty ? "علامة" : b.note).font(.subheadline).foregroundColor(.white).multilineTextAlignment(.leading)
-                                    Spacer(minLength: 0)
+                    // tab bar
+                    HStack(spacing: 6) {
+                        ForEach(DetailTab.allCases, id: \.self) { t in
+                            let on = detailTab == t
+                            let n = tabCount(t, l)
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { detailTab = t }
+                                if t != .notes { notesFocused = false }
+                            } label: {
+                                VStack(spacing: 3) {
+                                    Image(systemName: t.icon).font(.subheadline.weight(.semibold))
+                                    Text(n > 0 && t != .notes ? "\(t.rawValue) \(n)" : t.rawValue).font(.caption2.bold()).lineLimit(1)
                                 }
-                                .padding(10)
-                                .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .foregroundColor(on ? .white : .dim)
+                                .frame(maxWidth: .infinity).padding(.vertical, 9)
+                                .background(on ? AnyShapeStyle(Color.accentBlue) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
                             .buttonStyle(.plain)
-                            .contextMenu {
-                                Button { bookmarkText = b.note; editingBookmark = b } label: { Label("تعديل الملاحظة", systemImage: "pencil") }
-                                Button(role: .destructive) { store.deleteBookmark(b) } label: { Label("حذف", systemImage: "trash") }
-                            }
                         }
                     }
+                    .padding(4)
+                    .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-                    // notes
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("ملاحظاتي").font(.headline).foregroundColor(.white)
-                        TextEditor(text: Binding(get: { store.note(for: l.id) }, set: { store.setNote($0, for: l.id) }))
-                            .scrollContentBackground(.hidden)
-                            .foregroundColor(.white)
-                            .frame(minHeight: 110)
-                            .padding(8)
-                            .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-
-                    // lesson files
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("ملفات الدرس").font(.headline).foregroundColor(.white)
-                            Spacer()
-                            Menu {
-                                Button { showImporter = true } label: { Label("من تطبيق الملفات", systemImage: "folder") }
-                                Button { showPhotos = true } label: { Label("صورة من الاستوديو", systemImage: "photo") }
-                            } label: {
-                                Label("إرفاق", systemImage: "paperclip").font(.footnote.bold())
-                            }
+                    Group {
+                        switch detailTab {
+                        case .lessons: lessonsTab(l)
+                        case .notes: notesTab(l)
+                        case .marks: marksTab(l)
+                        case .files: filesTab(l)
                         }
-                        let atts = store.attachments(of: l.id)
-                        if atts.isEmpty {
-                            Text("ما فيه ملفات مرفقة بهذا الدرس").font(.footnote).foregroundColor(.dim)
-                        }
-                        ForEach(atts) { f in
-                            FileRow(file: f)
-                                .onTapGesture { preview = IdentURL(url: store.url(for: f.fileName)) }
-                                .contextMenu {
-                                    Button(role: .destructive) { store.deleteFile(f) } label: { Label("حذف", systemImage: "trash") }
-                                }
-                        }
-                    }
-
-                    // unit lessons
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(store.unit(l.unitID)?.title ?? "دروس الفصل").font(.headline).foregroundColor(.white)
-                        ForEach(store.lessons(in: l.unitID)) { x in lessonCard(x) }
                     }
                 }
                 .padding(16)
                 .padding(.bottom, 30)
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Color.appBg.opacity(0.0))
+    }
+
+    private func chip(_ t: String, icon: String) -> some View {
+        Label(t, systemImage: icon)
+            .font(.caption).foregroundColor(.dim).lineLimit(1)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Color.white.opacity(0.07), in: Capsule())
+    }
+
+    private func emptyHint(_ icon: String, _ text: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon).font(.title).foregroundColor(.white.opacity(0.25))
+            Text(text).font(.footnote).foregroundColor(.dim).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 28)
+    }
+
+    private func lessonsTab(_ l: Lesson) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(store.lessons(in: l.unitID)) { x in lessonCard(x) }
+        }
+    }
+
+    private func notesTab(_ l: Lesson) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: Binding(get: { store.note(for: l.id) }, set: { store.setNote($0, for: l.id) }))
+                    .focused($notesFocused)
+                    .scrollContentBackground(.hidden)
+                    .foregroundColor(.white)
+                    .frame(minHeight: 170)
+                    .padding(8)
+                if store.note(for: l.id).isEmpty && !notesFocused {
+                    Text("اكتب ملاحظاتك عن هذا الدرس…").font(.subheadline).foregroundColor(.dim)
+                        .padding(.horizontal, 14).padding(.vertical, 16).allowsHitTesting(false)
+                }
+            }
+            .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(notesFocused ? Color.accentBlue.opacity(0.8) : Color.white.opacity(0.06), lineWidth: 1.5))
+            if notesFocused {
+                Button { notesFocused = false } label: {
+                    Label("إخفاء الكيبورد", systemImage: "keyboard.chevron.compact.down")
+                        .font(.subheadline.bold()).foregroundColor(.white)
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        .background(Color.accentBlue, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
+        }
+    }
+
+    private func marksTab(_ l: Lesson) -> some View {
+        let bms = store.bookmarks(of: l.id)
+        return VStack(alignment: .leading, spacing: 10) {
+            Button { addBookmark() } label: {
+                Label("إضافة علامة عند \(formatTime(pm.current))", systemImage: "bookmark.fill")
+                    .font(.subheadline.bold()).foregroundColor(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    .background(Color.accentBlue.opacity(0.9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            if bms.isEmpty { emptyHint("bookmark", "أضف علامات على اللحظات المهمة في الفيديو للرجوع لها بسرعة") }
+            ForEach(bms) { b in
+                HStack(spacing: 10) {
+                    Button { pm.seek(to: b.time); pm.player.play(); pm.player.rate = pm.rate; pokeControls() } label: {
+                        HStack(spacing: 12) {
+                            Text(formatTime(b.time)).font(.footnote.bold().monospacedDigit()).foregroundColor(.white)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Color.accentBlue, in: Capsule())
+                            Text(b.note.isEmpty ? "علامة" : b.note).font(.subheadline).foregroundColor(.white).multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Button { bookmarkText = b.note; editingBookmark = b } label: {
+                        Image(systemName: "pencil").font(.footnote).foregroundColor(.dim)
+                            .frame(width: 34, height: 34).background(Color.white.opacity(0.07), in: Circle())
+                    }
+                    Button { withAnimation { store.deleteBookmark(b) }; haptic() } label: {
+                        Image(systemName: "trash").font(.footnote).foregroundColor(.red.opacity(0.9))
+                            .frame(width: 34, height: 34).background(Color.red.opacity(0.14), in: Circle())
+                    }
+                }
+                .padding(10)
+                .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+    }
+
+    private func filesTab(_ l: Lesson) -> some View {
+        let atts = store.attachments(of: l.id)
+        return VStack(alignment: .leading, spacing: 10) {
+            Menu {
+                Button { showImporter = true } label: { Label("من تطبيق الملفات", systemImage: "folder") }
+                Button { showPhotos = true } label: { Label("صورة من الاستوديو", systemImage: "photo") }
+            } label: {
+                Label("إرفاق ملف", systemImage: "paperclip")
+                    .font(.subheadline.bold()).foregroundColor(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    .background(Color.accentBlue.opacity(0.9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            if atts.isEmpty { emptyHint("doc.on.doc", "ما فيه ملفات مرفقة بهذا الدرس") }
+            ForEach(atts) { f in
+                FileRow(file: f)
+                    .onTapGesture { preview = IdentURL(url: store.url(for: f.fileName)) }
+                    .contextMenu {
+                        Button(role: .destructive) { store.deleteFile(f) } label: { Label("حذف", systemImage: "trash") }
+                    }
+            }
+        }
     }
 
     private func lessonCard(_ x: Lesson) -> some View {
