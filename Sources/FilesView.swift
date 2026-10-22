@@ -6,6 +6,7 @@ struct FilesView: View {
     @Environment(\.dismiss) private var dismiss
     let subjectID: UUID
     @State private var showImporter = false
+    @State private var showPhotos = false
     @State private var preview: IdentURL?
     @State private var renaming: FileAttachment?
     @State private var text = ""
@@ -47,17 +48,14 @@ struct FilesView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("إغلاق") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { showImporter = true } label: { Image(systemName: "plus.circle.fill") }
+                    Menu {
+                        Button { showImporter = true } label: { Label("من تطبيق الملفات", systemImage: "folder") }
+                        Button { showPhotos = true } label: { Label("صورة من الاستوديو", systemImage: "photo") }
+                    } label: { Image(systemName: "plus.circle.fill") }
                 }
             }
-            .documentPicker(isPresented: $showImporter, types: [.item]) { urls in
-                Task {
-                    busy = true
-                    let n = await store.importFiles(urls, subjectID: subjectID, lessonID: nil)
-                    busy = false
-                    toastText = n > 0 ? "تم إرفاق \(n) ملف ✓" : "تعذّر إرفاق الملف"
-                }
-            }
+            .attachSources(showFiles: $showImporter, showPhotos: $showPhotos, busy: $busy,
+                           subjectID: subjectID, lessonID: nil) { toastText = $0 }
             .toast($toastText)
             .sheet(item: $preview) { item in QuickLookView(url: item.url).ignoresSafeArea() }
             .alert("تغيير الاسم", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {

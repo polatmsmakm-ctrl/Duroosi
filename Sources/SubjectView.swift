@@ -74,7 +74,7 @@ struct SubjectView: View {
                 let n = await store.importLessons(urls, unitID: uid)
                 busy = false
                 expanded.insert(uid)
-                toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : "تعذّر استيراد الفيديو"
+                toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : ("تعذّر: " + (store.lastImportError ?? "استيراد الفيديو"))
             }
         }
         .sheet(item: $quizRun) { t in QuizRunnerView(unitID: t.id) }
@@ -330,7 +330,7 @@ struct SubjectView: View {
             if let movie = try? await item.loadTransferable(type: MovieFile.self) { urls.append(movie.url) }
         }
         let n = await store.importLessons(urls, unitID: unitID)
-        toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : "تعذّر استيراد الفيديو"
+        toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : ("تعذّر: " + (store.lastImportError ?? "استيراد الفيديو"))
         photoItems = []
         expanded.insert(unitID)
         busy = false

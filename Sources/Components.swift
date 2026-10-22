@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import QuickLook
 import AVKit
+import PhotosUI
 import CoreTransferable
 import UniformTypeIdentifiers
 
@@ -193,4 +194,65 @@ struct AirPlayButton: UIViewRepresentable {
         return v
     }
     func updateUIView(_ v: AVRoutePickerView, context: Context) {}
+}
+
+
+struct AttachSources: ViewModifier {
+    @EnvironmentObject var store: Store
+    @Binding var showFiles: Bool
+    @Binding var showPhotos: Bool
+    @Binding var busy: Bool
+    let subjectID: UUID
+    let lessonID: UUID?
+    let onMessage: (String) -> Void
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var errorText: String?
+
+    func body(content: Content) -> some View {
+        content
+            .documentPicker(isPresented: $showFiles, types: [.item]) { urls in
+                Task {
+                    busy = true
+                    store.lastImportError = nil
+                    let n = await store.importFiles(urls, subjectID: subjectID, lessonID: lessonID)
+                    busy = false
+                    finish(n)
+                }
+            }
+            .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 10, matching: .images)
+            .onChange(of: photoItems) { items in
+                guard !items.isEmpty else { return }
+                Task {
+                    busy = true
+                    store.lastImportError = nil
+                    var datas: [(Data, String)] = []
+                    for it in items {
+                        if let d = try? await it.loadTransferable(type: Data.self) {
+                            let ext = it.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+                            datas.append((d, ext))
+                        }
+                    }
+                    photoItems = []
+                    let n = store.importData(datas, subjectID: subjectID, lessonID: lessonID)
+                    busy = false
+                    finish(n)
+                }
+            }
+            .alert("تعذّر الإرفاق", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
+                Button("حسناً", role: .cancel) { errorText = nil }
+            } message: { Text(errorText ?? "") }
+    }
+
+    private func finish(_ n: Int) {
+        if n > 0 { onMessage("تم إرفاق \(n) ✓") }
+        else { errorText = store.lastImportError ?? "ما وصلني أي ملف من نافذة الاختيار" }
+    }
+}
+
+extension View {
+    func attachSources(showFiles: Binding<Bool>, showPhotos: Binding<Bool>, busy: Binding<Bool>,
+                       subjectID: UUID, lessonID: UUID?, onMessage: @escaping (String) -> Void) -> some View {
+        modifier(AttachSources(showFiles: showFiles, showPhotos: showPhotos, busy: busy,
+                               subjectID: subjectID, lessonID: lessonID, onMessage: onMessage))
+    }
 }

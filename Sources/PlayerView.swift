@@ -141,6 +141,7 @@ struct LessonPlayerView: View {
     @State private var scrubValue: Double = 0
     @State private var flash: String?
     @State private var showImporter = false
+    @State private var showPhotos = false
     @State private var busy = false
     @State private var preview: IdentURL?
     @AppStorage("autoNext") private var autoNext = true
@@ -184,15 +185,8 @@ struct LessonPlayerView: View {
             sleepTask?.cancel()
             setOrientation(.portrait)
         }
-        .documentPicker(isPresented: $showImporter, types: [.item]) { urls in
-            guard let l = lesson else { return }
-            Task {
-                busy = true
-                let n = await store.importFiles(urls, subjectID: l.subjectID, lessonID: l.id)
-                busy = false
-                toastText = n > 0 ? "تم إرفاق \(n) ملف ✓" : "تعذّر إرفاق الملف"
-            }
-        }
+        .attachSources(showFiles: $showImporter, showPhotos: $showPhotos, busy: $busy,
+                       subjectID: lesson?.subjectID ?? UUID(), lessonID: lessonID) { toastText = $0 }
         .sheet(item: $preview) { item in QuickLookView(url: item.url).ignoresSafeArea() }
         .alert("ملاحظة العلامة", isPresented: Binding(get: { editingBookmark != nil }, set: { if !$0 { editingBookmark = nil } })) {
             TextField("اكتب ملاحظة", text: $bookmarkText)
@@ -408,7 +402,10 @@ struct LessonPlayerView: View {
                         HStack {
                             Text("ملفات الدرس").font(.headline).foregroundColor(.white)
                             Spacer()
-                            Button { showImporter = true } label: {
+                            Menu {
+                                Button { showImporter = true } label: { Label("من تطبيق الملفات", systemImage: "folder") }
+                                Button { showPhotos = true } label: { Label("صورة من الاستوديو", systemImage: "photo") }
+                            } label: {
                                 Label("إرفاق", systemImage: "paperclip").font(.footnote.bold())
                             }
                         }

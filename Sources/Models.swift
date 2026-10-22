@@ -82,6 +82,7 @@ final class Store: ObservableObject {
     @Published var questions: [QuizQuestion] = []
     @Published var lessonNotes: [String: String] = [:]
     @Published var studyLog: [String: Double] = [:]
+    var lastImportError: String?
 
     private struct Library: Codable {
         var subjects: [Subject]
@@ -256,20 +257,35 @@ final class Store: ObservableObject {
     nonisolated static func copyIn(_ source: URL) throws -> String {
         let scoped = source.startAccessingSecurityScopedResource()
         defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+        try? FileManager.default.createDirectory(at: mediaDir, withIntermediateDirectories: true)
         let ext = source.pathExtension
         let name = UUID().uuidString + (ext.isEmpty ? "" : "." + ext)
         let dest = mediaDir.appendingPathComponent(name)
+
+        var coordError: NSError?
+        var copyError: Error?
+        NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: source, options: [.withoutChanges], error: &coordError) { readURL in
+            do { try FileManager.default.copyItem(at: readURL, to: dest) } catch { copyError = error }
+        }
+        if coordError != nil || copyError != nil {
+            // fallback: read bytes directly
+            do {
+                let data = try Data(contentsOf: source, options: .mappedIfSafe)
+                try data.write(to: dest, options: .atomic)
+            } catch {
+                throw copyError ?? coordError ?? error
+            }
+        }
         let tmp = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
         if source.resolvingSymlinksInPath().path.hasPrefix(tmp) {
-            do { try FileManager.default.moveItem(at: source, to: dest) }
-            catch {
-                try FileManager.default.copyItem(at: source, to: dest)
-                try? FileManager.default.removeItem(at: source)
-            }
-        } else {
-            try FileManager.default.copyItem(at: source, to: dest)
+            try? FileManager.default.removeItem(at: source)
         }
         return name
+    }
+
+    private func describe(_ e: Error) -> String {
+        let ns = e as NSError
+        return "\(ns.localizedDescription) [\(ns.domain) \(ns.code)]"
     }
 
     @discardableResult
@@ -278,8 +294,12 @@ final class Store: ObservableObject {
         var count = 0
         for url in urls {
             let title = url.deletingPathExtension().lastPathComponent
-            let result = await Task.detached { try? Store.copyIn(url) }.value
-            if let name = result {
+            let result = await Task.detached { () -> Result<String, Error> in
+                Result { try Store.copyIn(url) }
+            }.value
+            switch result {
+            case .failure(let e): lastImportError = describe(e)
+            case .success(let name):
                 lessons.append(Lesson(unitID: unitID, subjectID: u.subjectID, title: title, fileName: name))
                 count += 1
             }
@@ -293,14 +313,34 @@ final class Store: ObservableObject {
         var count = 0
         for url in urls {
             let title = url.lastPathComponent
-            let result = await Task.detached { try? Store.copyIn(url) }.value
-            if let name = result {
+            let result = await Task.detached { () -> Result<String, Error> in
+                Result { try Store.copyIn(url) }
+            }.value
+            switch result {
+            case .failure(let e): lastImportError = describe(e)
+            case .success(let name):
                 files.append(FileAttachment(subjectID: subjectID, lessonID: lessonID, title: title, fileName: name))
                 count += 1
             }
         }
         save()
         return count
+    }
+
+    @discardableResult
+    func importData(_ items: [(Data, String)], subjectID: UUID, lessonID: UUID?) -> Int {
+        var n = 0
+        for (d, ext) in items {
+            let name = UUID().uuidString + "." + ext
+            do {
+                try d.write(to: url(for: name), options: .atomic)
+                files.append(FileAttachment(subjectID: subjectID, lessonID: lessonID,
+                                            title: "صورة \(files.count + 1)", fileName: name))
+                n += 1
+            } catch { lastImportError = describe(error) }
+        }
+        save()
+        return n
     }
 
     // MARK: lessons / files
