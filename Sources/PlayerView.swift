@@ -69,6 +69,7 @@ struct LessonPlayerView: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.verticalSizeClass) private var vSize
+    @Environment(\.horizontalSizeClass) private var hSize
     @StateObject private var pm = PlayerModel()
     @State private var lessonID: UUID
     @AppStorage("playbackRate") private var savedRate: Double = 1.0
@@ -124,6 +125,19 @@ struct LessonPlayerView: View {
                 Color.appBg.ignoresSafeArea()
                 if full {
                     videoArea(insets: root.safeAreaInsets).ignoresSafeArea()
+                } else if hSize == .regular {
+                    let panelW = min(420, root.size.width * 0.38)
+                    let vw = root.size.width - panelW
+                    let ar: CGFloat = aspect > 0 ? aspect : 16.0 / 9.0
+                    let vh = min(root.size.height - root.safeAreaInsets.top, vw / ar)
+                    HStack(spacing: 0) {
+                        details.frame(width: panelW)
+                        ZStack {
+                            Color.black.ignoresSafeArea()
+                            videoArea(insets: root.safeAreaInsets).frame(height: vh)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 } else {
                     VStack(spacing: 0) {
                         videoArea(insets: root.safeAreaInsets).frame(height: inlineH)

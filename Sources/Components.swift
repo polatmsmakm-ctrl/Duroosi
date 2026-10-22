@@ -131,6 +131,18 @@ struct BusyOverlay: View {
 }
 
 
+func topViewController() -> UIViewController? {
+    var top = UIApplication.shared.connectedScenes
+        .compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }.first
+    while let p = top?.presentedViewController { top = p }
+    return top
+}
+
+func exportItem(_ url: URL) {
+    let p = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+    topViewController()?.present(p, animated: true)
+}
+
 func dlog(_ s: String) {
     NotificationCenter.default.post(name: Notification.Name("duroosi.log"), object: s)
 }

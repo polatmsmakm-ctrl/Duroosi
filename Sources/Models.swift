@@ -26,6 +26,16 @@ struct Lesson: Identifiable, Codable, Hashable {
     var isDone: Bool { progress > 0.95 }
 }
 
+struct BackupInfo: Identifiable, Hashable {
+    let url: URL
+    var id: String { url.path }
+    let date: Date
+    let subjects: Int
+    let lessons: Int
+    let hasMedia: Bool
+    var name: String { url.lastPathComponent }
+}
+
 struct SubjectPrefs: Codable, Hashable {
     var rate: Double?
     var fill: Bool?
@@ -308,6 +318,85 @@ final class Store: ObservableObject {
             try? FileManager.default.removeItem(at: source)
         }
         return name
+    }
+
+    // MARK: backups
+    nonisolated static let backupsDir = docs.appendingPathComponent("Backups", isDirectory: true)
+
+    func makeBackup(label: String = "نسخة") async throws -> URL {
+        save()
+        let lib = libURL
+        let media = Store.mediaDir
+        let root = Store.backupsDir
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let stamp = f.string(from: Date())
+        return try await Task.detached { () -> URL in
+            let fm = FileManager.default
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            let dir = root.appendingPathComponent("\(label)-\(stamp)")
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try fm.copyItem(at: lib, to: dir.appendingPathComponent("library.json"))
+            if fm.fileExists(atPath: media.path) {
+                try fm.copyItem(at: media, to: dir.appendingPathComponent("Media"))
+            }
+            return dir
+        }.value
+    }
+
+    func listBackups() -> [BackupInfo] {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: Store.backupsDir, includingPropertiesForKeys: [.creationDateKey]) else { return [] }
+        var out: [BackupInfo] = []
+        for u in items {
+            let libFile = u.appendingPathComponent("library.json")
+            guard let data = try? Data(contentsOf: libFile),
+                  let l = try? JSONDecoder().decode(Library.self, from: data) else { continue }
+            let d = (try? u.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+            var isDir: ObjCBool = false
+            let hasMedia = fm.fileExists(atPath: u.appendingPathComponent("Media").path, isDirectory: &isDir) && isDir.boolValue
+            out.append(BackupInfo(url: u, date: d, subjects: l.subjects.count, lessons: l.lessons.count, hasMedia: hasMedia))
+        }
+        return out.sorted { $0.date > $1.date }
+    }
+
+    func restoreBackup(_ b: BackupInfo) async throws {
+        _ = try await makeBackup(label: "قبل-الاستعادة")
+        let data = try Data(contentsOf: b.url.appendingPathComponent("library.json"))
+        _ = try JSONDecoder().decode(Library.self, from: data)
+        try data.write(to: libURL, options: .atomic)
+        let src = b.url.appendingPathComponent("Media")
+        let dst = Store.mediaDir
+        await Task.detached {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: dst, withIntermediateDirectories: true)
+            for name in (try? fm.contentsOfDirectory(atPath: src.path)) ?? [] {
+                let to = dst.appendingPathComponent(name)
+                if !fm.fileExists(atPath: to.path) {
+                    try? fm.copyItem(at: src.appendingPathComponent(name), to: to)
+                }
+            }
+        }.value
+        load()
+    }
+
+    func deleteBackup(_ b: BackupInfo) { try? FileManager.default.removeItem(at: b.url) }
+
+    func importBackupFolder(_ folder: URL) async throws {
+        let scoped = folder.startAccessingSecurityScopedResource()
+        defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
+        let root = Store.backupsDir
+        let name = folder.lastPathComponent
+        try await Task.detached {
+            let fm = FileManager.default
+            guard fm.fileExists(atPath: folder.appendingPathComponent("library.json").path) else {
+                throw NSError(domain: "duroosi", code: 1, userInfo: [NSLocalizedDescriptionKey: "هذا المجلد ما فيه ملف library.json (مو نسخة دروسي)"])
+            }
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            var dest = root.appendingPathComponent(name)
+            if fm.fileExists(atPath: dest.path) { dest = root.appendingPathComponent(name + "-استيراد-\(Int(Date().timeIntervalSince1970))") }
+            try fm.copyItem(at: folder, to: dest)
+        }.value
     }
 
     nonisolated static let videoExts: Set<String> = ["mp4", "mov", "m4v", "3gp", "mpg", "mpeg"]

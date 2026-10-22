@@ -318,6 +318,12 @@ struct SettingsTab: View {
     @AppStorage("autoNext") private var autoNext = true
     @AppStorage("loopLesson") private var loopLesson = false
     @State private var denied = false
+    @State private var backups: [BackupInfo] = []
+    @State private var backupBusy = false
+    @State private var restoreTarget: BackupInfo?
+    @State private var deleteTarget: BackupInfo?
+    @State private var showBackupImport = false
+    @State private var backupMsg: String?
 
     private var timeBinding: Binding<Date> {
         Binding(
@@ -383,6 +389,49 @@ struct SettingsTab: View {
                     .listRowBackground(Color.cardBg)
 
                     Section {
+                        Button {
+                            Task {
+                                backupBusy = true
+                                do { _ = try await store.makeBackup(); backupMsg = "تم إنشاء النسخة ✓" }
+                                catch { backupMsg = "تعذّر: \(error.localizedDescription)" }
+                                backups = store.listBackups()
+                                backupBusy = false
+                            }
+                        } label: {
+                            HStack {
+                                Label("إنشاء نسخة احتياطية الآن", systemImage: "externaldrive.badge.plus")
+                                Spacer()
+                                if backupBusy { ProgressView() }
+                            }
+                        }
+                        .disabled(backupBusy)
+                        ForEach(backups) { b in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(b.date.formatted(date: .abbreviated, time: .shortened)).font(.subheadline.bold())
+                                    Text("\(b.subjects) مواد · \(b.lessons) فيديو" + (b.hasMedia ? "" : " · بدون ملفات"))
+                                        .font(.caption).foregroundColor(.dim)
+                                }
+                                Spacer()
+                                Menu {
+                                    Button { restoreTarget = b } label: { Label("استعادة هذي النسخة", systemImage: "arrow.counterclockwise") }
+                                    Button { exportItem(b.url) } label: { Label("تصدير (iCloud / ملفات)", systemImage: "square.and.arrow.up") }
+                                    Button(role: .destructive) { deleteTarget = b } label: { Label("حذف النسخة", systemImage: "trash") }
+                                } label: {
+                                    Image(systemName: "ellipsis.circle").font(.title3)
+                                }
+                            }
+                        }
+                        Button { showBackupImport = true } label: {
+                            Label("استيراد نسخة من مجلد", systemImage: "folder.badge.plus")
+                        }
+                        if let m = backupMsg { Text(m).font(.footnote).foregroundColor(.dim) }
+                    } header: { Text("النسخ الاحتياطي") } footer: {
+                        Text("النسخة تحفظ المواد والفصول والملاحظات والعلامات والتقدّم والفيديوهات والملفات. النسخ تنحفظ داخل التطبيق، وإذا حذفت التطبيق تنحذف معه، فاستخدم «تصدير» وخزّنها في iCloud أو الملفات.")
+                    }
+                    .listRowBackground(Color.cardBg)
+
+                    Section {
                         if store.logLines.isEmpty {
                             Text("ما فيه أحداث بعد").font(.footnote).foregroundColor(.dim)
                         } else {
@@ -404,6 +453,40 @@ struct SettingsTab: View {
                     .listRowBackground(Color.cardBg)
                 }
                 .scrollContentBackground(.hidden)
+            }
+            .onAppear { backups = store.listBackups() }
+            .documentPicker(isPresented: $showBackupImport, types: [.folder], asCopy: false) { urls in
+                Task {
+                    backupBusy = true
+                    for u in urls {
+                        do { try await store.importBackupFolder(u); backupMsg = "تم استيراد النسخة ✓" }
+                        catch { backupMsg = "تعذّر: \(error.localizedDescription)" }
+                    }
+                    backups = store.listBackups()
+                    backupBusy = false
+                }
+            }
+            .alert("استعادة النسخة؟", isPresented: Binding(get: { restoreTarget != nil }, set: { if !$0 { restoreTarget = nil } })) {
+                Button("استعادة", role: .destructive) {
+                    if let b = restoreTarget {
+                        Task {
+                            backupBusy = true
+                            do { try await store.restoreBackup(b); backupMsg = "تمت الاستعادة ✓" }
+                            catch { backupMsg = "تعذّر: \(error.localizedDescription)" }
+                            backups = store.listBackups()
+                            backupBusy = false
+                        }
+                    }
+                    restoreTarget = nil
+                }
+                Button("إلغاء", role: .cancel) { restoreTarget = nil }
+            } message: { Text("راح تستبدل بيانات التطبيق الحالية بالنسخة. قبل الاستعادة ينعمل نسخة تلقائية من وضعك الحالي.") }
+            .alert("حذف النسخة؟", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })) {
+                Button("حذف", role: .destructive) {
+                    if let b = deleteTarget { store.deleteBackup(b); backups = store.listBackups() }
+                    deleteTarget = nil
+                }
+                Button("إلغاء", role: .cancel) { deleteTarget = nil }
             }
             .navigationTitle("الإعدادات")
             .navigationBarTitleDisplayMode(.large)

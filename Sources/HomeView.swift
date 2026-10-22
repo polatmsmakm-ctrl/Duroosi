@@ -7,73 +7,118 @@ struct HomeView: View {
     @State private var toDelete: Subject?
     @State private var playTarget: PlayTarget?
 
-    var body: some View {
+    @Environment(\.horizontalSizeClass) private var hSize
+    @State private var selected: UUID?
+
+    private func content(split: Bool) -> some View {
+        VStack(spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("دروسي").font(.system(size: 34, weight: .heavy)).foregroundColor(.white)
+                    Text(store.subjects.isEmpty ? "ابدأ بإضافة أول مادة" : "\(store.subjects.count) مواد")
+                        .font(.subheadline).foregroundColor(.dim)
+                }
+                Spacer()
+                Button { showNew = true } label: {
+                    Image(systemName: "plus")
+                        .font(.headline.bold())
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Color.accentBlue, in: Circle())
+                }
+            }
+            .padding(.top, 8)
+
+            if !store.lessons.isEmpty { StatsCard() }
+
+            if let l = store.globalContinue(), let s = store.subject(l.subjectID) {
+                ContinuePill(title: l.title, subtitle: s.name) {
+                    playTarget = PlayTarget(id: l.id)
+                }
+            }
+
+            if store.subjects.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "books.vertical.fill").font(.system(size: 60)).foregroundColor(.white.opacity(0.25))
+                    Text("ما فيه مواد بعد").font(.title3.bold()).foregroundColor(.white)
+                    Text("أضف مادة، وبعدها فصول، وبعدها ضيف فيديوهاتك وملفاتك داخلها")
+                        .font(.subheadline).foregroundColor(.dim).multilineTextAlignment(.center)
+                }
+                .padding(.top, 80)
+            }
+
+            LazyVGrid(columns: split
+                      ? [GridItem(.flexible())]
+                      : [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                ForEach(store.subjects) { s in
+                    Group {
+                        if split {
+                            Button { selected = s.id } label: { SubjectRow(subject: s) }
+                        } else {
+                            NavigationLink(value: s) { SubjectRow(subject: s) }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.accentBlue, lineWidth: split && selected == s.id ? 3 : 0))
+                    .contextMenu {
+                        Button { editing = s } label: { Label("تعديل", systemImage: "pencil") }
+                        Button(role: .destructive) { toDelete = s } label: { Label("حذف", systemImage: "trash") }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 30)
+    }
+
+    private var phoneBody: some View {
         NavigationStack {
             ZStack {
                 AppBackground()
-                ScrollView {
-                    VStack(spacing: 16) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("دروسي").font(.system(size: 34, weight: .heavy)).foregroundColor(.white)
-                                Text(store.subjects.isEmpty ? "ابدأ بإضافة أول مادة" : "\(store.subjects.count) مواد")
-                                    .font(.subheadline).foregroundColor(.dim)
-                            }
-                            Spacer()
-                            Button { showNew = true } label: {
-                                Image(systemName: "plus")
-                                    .font(.headline.bold())
-                                    .foregroundColor(.white)
-                                    .frame(width: 44, height: 44)
-                                    .background(Color.accentBlue, in: Circle())
-                            }
-                        }
-                        .padding(.top, 8)
-
-                        if !store.lessons.isEmpty { StatsCard() }
-
-                        if let l = store.globalContinue(), let s = store.subject(l.subjectID) {
-                            ContinuePill(title: l.title, subtitle: s.name) {
-                                playTarget = PlayTarget(id: l.id)
-                            }
-                        }
-
-                        if store.subjects.isEmpty {
-                            VStack(spacing: 14) {
-                                Image(systemName: "books.vertical.fill").font(.system(size: 60)).foregroundColor(.white.opacity(0.25))
-                                Text("ما فيه مواد بعد").font(.title3.bold()).foregroundColor(.white)
-                                Text("أضف مادة، وبعدها فصول، وبعدها ضيف فيديوهاتك وملفاتك داخلها")
-                                    .font(.subheadline).foregroundColor(.dim).multilineTextAlignment(.center)
-                            }
-                            .padding(.top, 80)
-                        }
-
-                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-                            ForEach(store.subjects) { s in
-                                NavigationLink(value: s) { SubjectRow(subject: s) }
-                                    .buttonStyle(.plain)
-                                    .contextMenu {
-                                        Button { editing = s } label: { Label("تعديل", systemImage: "pencil") }
-                                        Button(role: .destructive) { toDelete = s } label: { Label("حذف", systemImage: "trash") }
-                                    }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 30)
-                }
+                ScrollView { content(split: false) }
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Subject.self) { s in SubjectView(subjectID: s.id) }
-            .sheet(isPresented: $showNew) { SubjectEditor(subject: nil) }
-            .sheet(item: $editing) { s in SubjectEditor(subject: s) }
-            .fullScreenCover(item: $playTarget) { t in LessonPlayerView(lessonID: t.id) }
-            .alert("حذف المادة؟", isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } })) {
-                Button("حذف", role: .destructive) { if let s = toDelete { store.deleteSubject(s) }; toDelete = nil }
-                Button("إلغاء", role: .cancel) { toDelete = nil }
-            } message: {
-                Text("راح تنحذف المادة مع كل فصولها ودروسها وملفاتها.")
+        }
+    }
+
+    private var splitBody: some View {
+        NavigationSplitView {
+            ZStack {
+                AppBackground()
+                ScrollView { content(split: true) }
             }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 420)
+        } detail: {
+            ZStack {
+                AppBackground()
+                if let id = selected, store.subject(id) != nil {
+                    NavigationStack { SubjectView(subjectID: id) }.id(id)
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "sidebar.leading").font(.system(size: 54)).foregroundColor(.white.opacity(0.25))
+                        Text("اختر مادة من القائمة").font(.title3.bold()).foregroundColor(.white.opacity(0.7))
+                    }
+                }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    var body: some View {
+        Group {
+            if hSize == .regular { splitBody } else { phoneBody }
+        }
+        .sheet(isPresented: $showNew) { SubjectEditor(subject: nil) }
+        .sheet(item: $editing) { s in SubjectEditor(subject: s) }
+        .fullScreenCover(item: $playTarget) { t in LessonPlayerView(lessonID: t.id) }
+        .alert("حذف المادة؟", isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } })) {
+            Button("حذف", role: .destructive) { if let s = toDelete { store.deleteSubject(s) }; toDelete = nil }
+            Button("إلغاء", role: .cancel) { toDelete = nil }
+        } message: {
+            Text("راح تنحذف المادة مع كل فصولها ودروسها وملفاتها.")
         }
     }
 }
