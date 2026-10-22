@@ -606,7 +606,7 @@ struct LessonPlayerView: View {
             pm.setCues([]); return
         }
         let text = String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: .windowsCP1256)
+            ?? String(data: data, encoding: String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.windowsArabic.rawValue))))
             ?? String(decoding: data, as: UTF8.self)
         pm.setCues(SRT.parse(text))
     }
