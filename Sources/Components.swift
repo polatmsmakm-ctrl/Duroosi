@@ -83,7 +83,7 @@ struct FileRow: View {
                 .font(.title3)
                 .foregroundColor(.white)
                 .frame(width: 42, height: 42)
-                .background(LinearGradient(colors: [Color.accentBlue, Color(red: 0.45, green: 0.3, blue: 0.95)],
+                .background(LinearGradient(colors: [Color.accentBlue, Color.goldDeep],
                                            startPoint: .topLeading, endPoint: .bottomTrailing),
                             in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
@@ -212,7 +212,7 @@ struct AirPlayButton: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let v = AVRoutePickerView()
         v.tintColor = .white
-        v.activeTintColor = .systemBlue
+        v.activeTintColor = UIColor(red: 0.91, green: 0.56, blue: 0.20, alpha: 1)
         v.prioritizesVideoDevices = true
         return v
     }

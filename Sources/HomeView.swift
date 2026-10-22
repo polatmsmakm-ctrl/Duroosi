@@ -97,7 +97,7 @@ struct ContinuePill: View {
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
             .background(
-                LinearGradient(colors: [Color(red: 0.42, green: 0.25, blue: 0.95), Color(red: 0.25, green: 0.2, blue: 0.7)],
+                LinearGradient(colors: [Color(red: 0.93, green: 0.60, blue: 0.22), Color(red: 0.62, green: 0.30, blue: 0.10)],
                                startPoint: .topLeading, endPoint: .bottomTrailing),
                 in: Capsule())
             .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
@@ -212,7 +212,7 @@ struct StatsCard: View {
         HStack(spacing: 0) {
             stat("flame.fill", "\(store.streak())", "أيام متتالية", .orange)
             Divider().background(Color.white.opacity(0.12)).frame(height: 40)
-            stat("clock.fill", "\(store.todayMinutes())", "دقيقة اليوم", .cyan)
+            stat("clock.fill", "\(store.todayMinutes())", "دقيقة اليوم", Color(red: 1.0, green: 0.78, blue: 0.40))
             Divider().background(Color.white.opacity(0.12)).frame(height: 40)
             stat("checkmark.circle.fill", "\(d.done)/\(d.total)", "دروس مكتملة", .doneGreen)
         }

@@ -5,7 +5,8 @@ extension Color {
     static let appBg = Color(red: 0.04, green: 0.04, blue: 0.065)
     static let cardBg = Color(red: 0.07, green: 0.07, blue: 0.11).opacity(0.74)
     static let cardBg2 = Color(red: 0.13, green: 0.13, blue: 0.20).opacity(0.88)
-    static let accentBlue = Color(red: 0.49, green: 0.40, blue: 1.0)
+    static let accentBlue = Color(red: 0.91, green: 0.56, blue: 0.20)   // ذهبي كوني
+    static let goldDeep = Color(red: 0.66, green: 0.32, blue: 0.10)
     static let doneGreen = Color(red: 0.25, green: 0.80, blue: 0.48)
     static let dim = Color.white.opacity(0.62)
 }

@@ -56,7 +56,7 @@ struct FileAttachment: Identifiable, Codable, Hashable {
 
 enum Palette {
     static let gradients: [[Color]] = [
-        [Color(red: 0.36, green: 0.42, blue: 0.98), Color(red: 0.55, green: 0.30, blue: 0.90)],
+        [Color(red: 0.95, green: 0.62, blue: 0.24), Color(red: 0.70, green: 0.34, blue: 0.12)],
         [Color(red: 0.98, green: 0.45, blue: 0.40), Color(red: 0.95, green: 0.25, blue: 0.50)],
         [Color(red: 0.15, green: 0.75, blue: 0.60), Color(red: 0.10, green: 0.55, blue: 0.75)],
         [Color(red: 1.00, green: 0.70, blue: 0.20), Color(red: 0.95, green: 0.45, blue: 0.15)],
