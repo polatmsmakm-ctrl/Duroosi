@@ -13,7 +13,7 @@ struct SubjectView: View {
     @State private var showFiles = false
     @State private var showSearch = false
     @State private var busy = false
-    @State private var float = false
+    @State private var scrollTarget: UUID?
 
     @State private var showPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
@@ -34,10 +34,19 @@ struct SubjectView: View {
         ZStack {
             AppBackground()
             if let s = subject {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        hero(s)
-                        curriculum(s)
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(spacing: 0) {
+                            header(s)
+                            curriculum(s)
+                        }
+                    }
+                    .onChange(of: scrollTarget) { id in
+                        guard let id else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            withAnimation(.easeInOut) { proxy.scrollTo(id, anchor: .top) }
+                            scrollTarget = nil
+                        }
                     }
                 }
             }
@@ -45,7 +54,7 @@ struct SubjectView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
-        .navigationTitle(subject?.name ?? "")
+        .navigationTitle("")
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button { showSearch = true } label: {
@@ -85,90 +94,117 @@ struct SubjectView: View {
             Button("حفظ") { commitRename() }
             Button("إلغاء", role: .cancel) { renameKind = nil }
         }
-        .alert("حذف الوحدة؟", isPresented: Binding(get: { unitToDelete != nil }, set: { if !$0 { unitToDelete = nil } })) {
+        .alert("حذف الفصل؟", isPresented: Binding(get: { unitToDelete != nil }, set: { if !$0 { unitToDelete = nil } })) {
             Button("حذف", role: .destructive) { if let u = unitToDelete { store.deleteUnit(u) }; unitToDelete = nil }
             Button("إلغاء", role: .cancel) { unitToDelete = nil }
-        } message: { Text("راح تنحذف الوحدة مع كل دروسها وملفاتها.") }
+        } message: { Text("راح ينحذف الفصل مع كل فيديوهاته وملفاته.") }
         .alert("حذف الدرس؟", isPresented: Binding(get: { lessonToDelete != nil }, set: { if !$0 { lessonToDelete = nil } })) {
             Button("حذف", role: .destructive) { if let l = lessonToDelete { store.deleteLesson(l) }; lessonToDelete = nil }
             Button("إلغاء", role: .cancel) { lessonToDelete = nil }
         }
         .onAppear {
-            float = true
             if expanded.isEmpty, let f = store.units(of: subjectID).first { expanded.insert(f.id) }
         }
     }
 
-    // MARK: hero
-    private func hero(_ s: Subject) -> some View {
-        VStack(spacing: 18) {
-            ZStack {
-                Circle()
-                    .fill(RadialGradient(colors: [Palette.glow(s.colorIndex).opacity(0.55), .clear],
-                                         center: .center, startRadius: 5, endRadius: 150))
-                    .frame(width: 300, height: 300)
-                Image(systemName: s.icon)
-                    .font(.system(size: 120, weight: .bold))
-                    .foregroundStyle(LinearGradient(colors: [.white, Palette.glow(s.colorIndex)], startPoint: .top, endPoint: .bottom))
-                    .shadow(color: Palette.glow(s.colorIndex).opacity(0.8), radius: 24)
-                    .offset(y: float ? -8 : 8)
-                    .animation(.easeInOut(duration: 3).repeatForever(autoreverses: true), value: float)
+    // MARK: header
+    private func header(_ s: Subject) -> some View {
+        let units = store.units(of: s.id)
+        let lessonCount = store.lessons.filter { $0.subjectID == s.id }.count
+        let pct = Int(store.progress(subject: s.id) * 100)
+        return VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                SubjectOrb(subject: s, size: 62)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(s.name).font(.title2.bold()).foregroundColor(.white).lineLimit(1)
+                    Text("\(units.count) فصل · \(lessonCount) درس · \(pct)% مكتمل")
+                        .font(.footnote).foregroundColor(.dim)
+                }
+                Spacer(minLength: 0)
             }
-            .frame(height: 230)
-
             if let l = store.continueLesson(subjectID) {
                 ContinuePill(title: l.title, subtitle: store.progress(subject: subjectID) > 0 ? "تابع من حيث وقفت" : "ابدأ الآن") {
                     playTarget = PlayTarget(id: l.id)
                 }
-                .padding(.horizontal, 16)
             }
         }
-        .padding(.top, 70)
-        .padding(.bottom, 28)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 16)
         .background(
-            LinearGradient(colors: [.clear, Palette.glow(s.colorIndex).opacity(0.35)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [Palette.glow(s.colorIndex).opacity(0.28), .clear], startPoint: .top, endPoint: .bottom)
         )
     }
 
     // MARK: curriculum
     private func curriculum(_ s: Subject) -> some View {
-        VStack(spacing: 14) {
-            HStack {
-                Text("منهج المادة").font(.title3.bold()).foregroundColor(.white)
+        let units = store.units(of: s.id)
+        return VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Text("الفصول").font(.title3.bold()).foregroundColor(.white)
                 Spacer()
-                Text("\(Int(store.progress(subject: s.id) * 100))%").font(.subheadline.bold()).foregroundColor(.dim)
+                if units.count > 1 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            if expanded.count == units.count { expanded.removeAll() }
+                            else { expanded = Set(units.map { $0.id }) }
+                        }
+                    } label: {
+                        Text(expanded.count == units.count ? "طي الكل" : "فتح الكل")
+                            .font(.footnote.bold()).foregroundColor(.accentBlue)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(Color.cardBg, in: Capsule())
+                    }
+                }
+                Button {
+                    renameText = ""
+                    renameKind = .newUnit(s.id)
+                } label: {
+                    Label("فصل", systemImage: "plus")
+                        .font(.footnote.bold()).foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Color.accentBlue, in: Capsule())
+                }
             }
-            .padding(.top, 22)
 
             Button { showFiles = true } label: {
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("المذكرات والملفات").font(.headline).foregroundColor(.white)
-                        Text("مذكرات وملفات المادة المهمة").font(.caption).foregroundColor(.dim)
+                HStack(spacing: 12) {
+                    Image(systemName: "doc.on.doc.fill")
+                        .font(.body).foregroundColor(.white)
+                        .frame(width: 42, height: 42)
+                        .background(Palette.gradient(s.colorIndex), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("المذكرات والملفات").font(.subheadline.bold()).foregroundColor(.white)
+                        Text("\(store.fileCount(s.id)) ملف").font(.caption).foregroundColor(.dim)
                     }
                     Spacer(minLength: 0)
-                    Text("\(store.fileCount(s.id))")
-                        .font(.caption.bold()).foregroundColor(.white)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Color.accentBlue, in: Capsule())
-                    Image(systemName: "doc.on.doc.fill")
-                        .font(.title2).foregroundColor(.white)
-                        .frame(width: 54, height: 54)
-                        .background(Palette.gradient(s.colorIndex), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    Image(systemName: "chevron.left").font(.caption.bold()).foregroundColor(.dim)
                 }
-                .padding(14)
-                .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
+                .padding(12)
+                .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
             }
             .buttonStyle(.plain)
 
-            ForEach(store.units(of: s.id)) { u in unitCard(u) }
+            if units.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "rectangle.stack.badge.plus").font(.system(size: 44)).foregroundColor(.white.opacity(0.3))
+                    Text("ما فيه فصول بعد").font(.headline).foregroundColor(.white)
+                    Text("اضغط «+ فصل» وسمّه، وبعدها ضيف الفيديوهات تحته").font(.footnote).foregroundColor(.dim)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.vertical, 40)
+            }
+
+            ForEach(Array(units.enumerated()), id: \.element.id) { idx, u in
+                unitCard(u, number: idx + 1).id(u.id)
+            }
 
             Button {
                 renameText = ""
                 renameKind = .newUnit(s.id)
             } label: {
-                Label("إضافة وحدة", systemImage: "plus")
+                Label("إضافة فصل جديد", systemImage: "plus")
                     .font(.headline).foregroundColor(.accentBlue)
                     .frame(maxWidth: .infinity).padding(.vertical, 16)
                     .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -176,28 +212,37 @@ struct SubjectView: View {
                         .strokeBorder(Color.accentBlue.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5])))
             }
             .buttonStyle(.plain)
-            .padding(.bottom, 50)
+            .padding(.bottom, 90)
         }
         .padding(.horizontal, 16)
-        .background(Color.appBg.opacity(0.92), in: RoundedCorner(radius: 32, corners: [.topLeft, .topRight]))
-        .frame(minHeight: 420, alignment: .top)
     }
 
-    private func unitCard(_ u: CourseUnit) -> some View {
+    private func unitCard(_ u: CourseUnit, number: Int) -> some View {
         let ls = store.lessons(in: u.id)
         let isOpen = expanded.contains(u.id)
+        let p = store.progress(unit: u.id)
+        let total = ls.reduce(0) { $0 + $1.duration }
         return VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.25)) {
+                    withAnimation(.easeInOut(duration: 0.28)) {
                         if isOpen { expanded.remove(u.id) } else { expanded.insert(u.id) }
                     }
                 } label: {
-                    HStack(spacing: 10) {
-                        Text(u.title).font(.headline).foregroundColor(.white).multilineTextAlignment(.leading)
+                    HStack(spacing: 12) {
+                        Text("\(number)")
+                            .font(.subheadline.bold()).foregroundColor(.white)
+                            .frame(width: 36, height: 36)
+                            .background(p >= 0.95 ? AnyShapeStyle(Color.doneGreen) : AnyShapeStyle(Color.accentBlue), in: Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(u.title).font(.headline).foregroundColor(.white).multilineTextAlignment(.leading).lineLimit(2)
+                            Text(ls.isEmpty ? "فارغ" : "\(ls.count) فيديو" + (total > 0 ? " · \(formatTime(total))" : "") + " · \(Int(p * 100))%")
+                                .font(.caption).foregroundColor(.dim)
+                        }
                         Spacer(minLength: 0)
-                        Text("\(ls.count)").font(.caption.bold()).foregroundColor(.dim)
-                        Image(systemName: isOpen ? "minus" : "plus").font(.subheadline.bold()).foregroundColor(.dim)
+                        Image(systemName: "chevron.down")
+                            .font(.footnote.bold()).foregroundColor(.dim)
+                            .rotationEffect(.degrees(isOpen ? 180 : 0))
                     }
                     .contentShape(Rectangle())
                 }
@@ -207,37 +252,45 @@ struct SubjectView: View {
                     Button { targetUnit = u.id; showPhotos = true } label: { Label("إضافة فيديو من الاستوديو", systemImage: "photo.on.rectangle") }
                     Button { targetUnit = u.id; showVideoImporter = true } label: { Label("إضافة فيديو من الملفات", systemImage: "folder") }
                     Divider()
-                    Button { quizEdit = PlayTarget(id: u.id) } label: { Label("أسئلة اختبار الوحدة", systemImage: "checklist") }
-                    Button { renameText = u.title; renameKind = .unit(u) } label: { Label("تغيير اسم الوحدة", systemImage: "pencil") }
+                    Button { quizEdit = PlayTarget(id: u.id) } label: { Label("أسئلة اختبار الفصل", systemImage: "checklist") }
+                    Button { renameText = u.title; renameKind = .unit(u) } label: { Label("تغيير اسم الفصل", systemImage: "pencil") }
                     Button { store.moveUnit(u, by: -1) } label: { Label("نقل للأعلى", systemImage: "arrow.up") }
                     Button { store.moveUnit(u, by: 1) } label: { Label("نقل للأسفل", systemImage: "arrow.down") }
-                    Button(role: .destructive) { unitToDelete = u } label: { Label("حذف الوحدة", systemImage: "trash") }
+                    Button(role: .destructive) { unitToDelete = u } label: { Label("حذف الفصل", systemImage: "trash") }
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
-                        .font(.title3).foregroundColor(.accentBlue)
+                        .font(.title2).foregroundColor(.accentBlue)
                 }
             }
-            .padding(.horizontal, 18).padding(.vertical, 18)
+            .padding(.horizontal, 14).padding(.vertical, 14)
 
             if isOpen {
                 VStack(spacing: 0) {
-                    if ls.isEmpty {
-                        Text("ما فيه دروس — اضغط ⋯ وأضف فيديو")
-                            .font(.footnote).foregroundColor(.dim).padding(.vertical, 14)
-                    }
+                    Divider().background(Color.white.opacity(0.1)).padding(.bottom, 6)
                     ForEach(Array(ls.enumerated()), id: \.element.id) { idx, l in
                         lessonRow(l, isFirst: idx == 0, isLast: idx == ls.count - 1)
                     }
-                    Divider().background(Color.white.opacity(0.12)).padding(.vertical, 4)
+                    Menu {
+                        Button { targetUnit = u.id; showPhotos = true } label: { Label("من الاستوديو", systemImage: "photo.on.rectangle") }
+                        Button { targetUnit = u.id; showVideoImporter = true } label: { Label("من الملفات", systemImage: "folder") }
+                    } label: {
+                        Label("إضافة فيديوهات لهذا الفصل", systemImage: "plus.circle.fill")
+                            .font(.subheadline.bold()).foregroundColor(.accentBlue)
+                            .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(Color.accentBlue.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .padding(.top, 8)
+                    Divider().background(Color.white.opacity(0.1)).padding(.vertical, 6)
                     quizRow(u)
                 }
                 .padding(.horizontal, 14)
-                .padding(.bottom, 10)
-                .transition(.opacity)
+                .padding(.bottom, 12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
+        .clipped()
     }
 
     private func quizRow(_ u: CourseUnit) -> some View {
@@ -251,7 +304,7 @@ struct SubjectView: View {
                     .frame(width: 28, height: 28)
                     .background(Color.doneGreen.opacity(0.85), in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("اختبار مراجعة الوحدة").font(.subheadline.weight(.medium)).foregroundColor(.white)
+                    Text("اختبار مراجعة الفصل").font(.subheadline.weight(.medium)).foregroundColor(.white)
                     Text(n == 0 ? "اضغط لإضافة أسئلة" : "\(n) سؤال").font(.caption2).foregroundColor(.dim)
                 }
                 Spacer(minLength: 0)
@@ -303,8 +356,8 @@ struct SubjectView: View {
     // MARK: helpers
     private var renameTitle: String {
         switch renameKind {
-        case .newUnit: return "وحدة جديدة"
-        case .unit: return "تغيير اسم الوحدة"
+        case .newUnit: return "فصل جديد"
+        case .unit: return "تغيير اسم الفصل"
         case .lesson: return "تغيير اسم الدرس"
         case nil: return ""
         }
@@ -318,6 +371,7 @@ struct SubjectView: View {
         case .newUnit(let sid):
             let u = store.addUnit(subjectID: sid, title: t)
             expanded.insert(u.id)
+            scrollTarget = u.id
         case .unit(let u): store.renameUnit(u, to: t)
         case .lesson(let l): store.renameLesson(l, to: t)
         }

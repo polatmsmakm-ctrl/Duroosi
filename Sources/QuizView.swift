@@ -16,7 +16,7 @@ struct QuizEditorView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "checklist").font(.system(size: 52)).foregroundColor(.white.opacity(0.25))
                         Text("ما فيه أسئلة").font(.headline).foregroundColor(.white)
-                        Text("اضغط + لإضافة أسئلة اختيار من متعدد لمراجعة الوحدة")
+                        Text("اضغط + لإضافة أسئلة اختيار من متعدد لمراجعة الفصل")
                             .font(.subheadline).foregroundColor(.dim).multilineTextAlignment(.center)
                     }.padding(30)
                 } else {
@@ -216,7 +216,7 @@ struct QuizRunnerView: View {
             Text(pct >= 80 ? "🏆" : (pct >= 50 ? "👍" : "📚")).font(.system(size: 70))
             Text("\(score) من \(questions.count)").font(.largeTitle.bold()).foregroundColor(.white)
             Text("\(pct)%").font(.title2.bold()).foregroundColor(pct >= 50 ? .doneGreen : .orange)
-            Text(pct >= 80 ? "ممتاز! أنت متقن للوحدة" : (pct >= 50 ? "جيد، راجع الأسئلة اللي أخطأت فيها" : "تحتاج مراجعة أكثر للوحدة"))
+            Text(pct >= 80 ? "ممتاز! أنت متقن للفصل" : (pct >= 50 ? "جيد، راجع الأسئلة اللي أخطأت فيها" : "تحتاج مراجعة أكثر للفصل"))
                 .font(.subheadline).foregroundColor(.dim)
             Button { start() } label: {
                 Text("إعادة الاختبار").font(.headline).foregroundColor(.white)

@@ -630,7 +630,7 @@ struct LessonPlayerView: View {
 
                     // unit lessons
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(store.unit(l.unitID)?.title ?? "دروس الوحدة").font(.headline).foregroundColor(.white)
+                        Text(store.unit(l.unitID)?.title ?? "دروس الفصل").font(.headline).foregroundColor(.white)
                         ForEach(store.lessons(in: l.unitID)) { x in lessonCard(x) }
                     }
                 }

@@ -114,7 +114,7 @@ struct SubjectRow: View {
             SubjectOrb(subject: subject, size: 62)
             VStack(alignment: .leading, spacing: 7) {
                 Text(subject.name).font(.headline).foregroundColor(.white).lineLimit(1)
-                Text("\(store.units(of: subject.id).count) وحدة · \(lessonCount) درس · \(store.fileCount(subject.id)) ملف")
+                Text("\(store.units(of: subject.id).count) فصل · \(lessonCount) درس · \(store.fileCount(subject.id)) ملف")
                     .font(.caption).foregroundColor(.dim)
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
