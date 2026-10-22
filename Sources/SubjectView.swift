@@ -76,8 +76,8 @@ struct SubjectView: View {
             Task { await importPhotos(items, unitID: uid) }
         }
         .documentPicker(isPresented: $showVideoImporter,
-                        types: [.movie, .video, .mpeg4Movie, .quickTimeMovie], asCopy: false) { urls in
-            guard let uid = targetUnit else { return }
+                        types: [.movie, .video, .mpeg4Movie, .quickTimeMovie], asCopy: true) { urls in
+            guard let uid = targetUnit else { toastText = "اختر الفصل أول"; return }
             Task {
                 busy = true
                 let n = await store.importLessons(urls, unitID: uid)

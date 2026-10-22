@@ -262,6 +262,12 @@ final class Store: ObservableObject {
         let name = UUID().uuidString + (ext.isEmpty ? "" : "." + ext)
         let dest = mediaDir.appendingPathComponent(name)
 
+        let tmpPath = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+        if source.resolvingSymlinksInPath().path.hasPrefix(tmpPath),
+           (try? FileManager.default.moveItem(at: source, to: dest)) != nil {
+            return name
+        }
+
         var coordError: NSError?
         var copyError: Error?
         NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: source, options: [.withoutChanges], error: &coordError) { readURL in
