@@ -3,8 +3,67 @@ import AVFoundation
 import AVKit
 import UniformTypeIdentifiers
 
-private enum DragMode { case none, seek, brightness, volume }
+private enum DragMode { case none, seek, brightness, volume, pan }
 private struct HUDInfo { let icon: String; let text: String; let progress: Double? }
+
+private func playerTime(_ s: Double) -> String {
+    let t = Int(s.isFinite ? max(s, 0) : 0)
+    let h = t / 3600, m = (t % 3600) / 60, sec = t % 60
+    return h > 0 ? String(format: "%d:%02d:%02d", h, m, sec) : String(format: "%02d:%02d", m, sec)
+}
+
+struct VideoScrubber: View {
+    var value: Double
+    var duration: Double
+    var buffered: Double
+    var markers: [Double]
+    var onBegan: () -> Void
+    var onChanged: (Double) -> Void
+    var onEnded: (Double) -> Void
+    @State private var dragging = false
+
+    var body: some View {
+        GeometryReader { g in
+            let inset: CGFloat = 14
+            let w = max(g.size.width - inset * 2, 1)
+            let frac = duration > 0 ? CGFloat(min(max(value / duration, 0), 1)) : 0
+            let bf = duration > 0 ? CGFloat(min(max(buffered / duration, 0), 1)) : 0
+            let d: CGFloat = dragging ? 28 : 22
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.28)).frame(width: w, height: 4).offset(x: inset)
+                Capsule().fill(Color.white.opacity(0.6)).frame(width: w * bf, height: 4).offset(x: inset)
+                Capsule().fill(Color.accentBlue).frame(width: w * frac, height: 4).offset(x: inset)
+                ForEach(Array(markers.enumerated()), id: \.offset) { _, m in
+                    if duration > 0 {
+                        Capsule().fill(Color.yellow).frame(width: 3, height: 12)
+                            .offset(x: inset + w * CGFloat(min(m / duration, 1)) - 1.5)
+                    }
+                }
+                Circle().fill(Color.accentBlue)
+                    .overlay(Circle().stroke(Color.white.opacity(0.95), lineWidth: 2.5))
+                    .frame(width: d, height: d)
+                    .offset(x: inset + w * frac - d / 2)
+            }
+            .frame(height: g.size.height)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        if !dragging { dragging = true; onBegan() }
+                        let f = min(max((v.location.x - inset) / w, 0), 1)
+                        onChanged(Double(f) * duration)
+                    }
+                    .onEnded { v in
+                        let f = min(max((v.location.x - inset) / w, 0), 1)
+                        dragging = false
+                        onEnded(Double(f) * duration)
+                    }
+            )
+            .animation(.easeOut(duration: 0.12), value: dragging)
+        }
+        .frame(height: 36)
+    }
+}
 
 struct LessonPlayerView: View {
     @EnvironmentObject var store: Store
@@ -28,6 +87,10 @@ struct LessonPlayerView: View {
     @State private var dragMode: DragMode = .none
     @State private var dragStart: Double = 0
     @State private var hud: HUDInfo?
+    @State private var zoom: CGFloat = 1
+    @State private var lastZoom: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    @State private var lastPan: CGSize = .zero
     @State private var countdown: Int?
     @State private var countTask: Task<Void, Never>?
     @State private var showImporter = false
@@ -46,17 +109,25 @@ struct LessonPlayerView: View {
     private var full: Bool { isFullscreen || vSize == .compact }
 
     var body: some View {
-        ZStack {
-            Color.appBg.ignoresSafeArea()
-            if full {
-                videoArea.ignoresSafeArea()
-            } else {
-                VStack(spacing: 0) {
-                    videoArea.aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    details
+        GeometryReader { root in
+            let aspect = pm.videoAspect
+            let inlineH: CGFloat = {
+                let w = root.size.width
+                guard aspect > 0 else { return w * 9 / 16 }
+                return max(w * 9 / 16, min(w / aspect, root.size.height * 0.6))
+            }()
+            ZStack {
+                Color.appBg.ignoresSafeArea()
+                if full {
+                    videoArea(insets: root.safeAreaInsets).ignoresSafeArea()
+                } else {
+                    VStack(spacing: 0) {
+                        videoArea(insets: root.safeAreaInsets).frame(height: inlineH)
+                        details
+                    }
                 }
+                if busy { BusyOverlay() }
             }
-            if busy { BusyOverlay() }
         }
         .statusBarHidden(full)
         .persistentSystemOverlays(full ? .hidden : .automatic)
@@ -95,11 +166,13 @@ struct LessonPlayerView: View {
     }
 
     // MARK: video
-    private var videoArea: some View {
+    private func videoArea(insets: EdgeInsets) -> some View {
         GeometryReader { geo in
             ZStack {
                 Color.black
                 PlayerLayerView(model: pm, fill: pm.fill)
+                    .scaleEffect(zoom)
+                    .offset(pan)
                 VolumeHost().frame(width: 10, height: 10).opacity(0.01).allowsHitTesting(false)
 
                 if locked {
@@ -118,7 +191,7 @@ struct LessonPlayerView: View {
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
                             .padding(.horizontal, 24)
-                            .padding(.bottom, showControls && !locked ? 70 : 16)
+                            .padding(.bottom, showControls && !locked ? 96 : 20)
                     }
                     .allowsHitTesting(false)
                 }
@@ -143,7 +216,7 @@ struct LessonPlayerView: View {
                         .font(.subheadline.bold()).foregroundColor(.white)
                         .padding(.horizontal, 16).padding(.vertical, 10)
                         .background(Color.black.opacity(0.65), in: Capsule())
-                        .padding(.top, 54)
+                        .padding(.top, full ? max(insets.top, 14) + 50 : 54)
                         Spacer()
                     }
                     .allowsHitTesting(false)
@@ -154,7 +227,7 @@ struct LessonPlayerView: View {
                         Label("2x", systemImage: "forward.fill").font(.footnote.bold()).foregroundColor(.white)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(Color.black.opacity(0.65), in: Capsule())
-                            .padding(.top, 14)
+                            .padding(.top, full ? max(insets.top, 14) + 8 : 14)
                         Spacer()
                     }
                     .allowsHitTesting(false)
@@ -180,18 +253,18 @@ struct LessonPlayerView: View {
                     .padding(24)
                 }
 
-                if showControls && !locked { controls.transition(.opacity) }
+                if showControls && !locked { controls(insets: insets).transition(.opacity) }
 
                 if locked {
                     HStack {
                         Button { locked = false; pokeControls() } label: {
                             Image(systemName: "lock.fill").foregroundColor(.white)
-                                .frame(width: 42, height: 42).background(Color.black.opacity(0.55), in: Circle())
+                                .frame(width: 44, height: 44).background(Color.black.opacity(0.55), in: Circle())
                         }
-                        .padding(.leading, 16)
+                        .padding(.leading, full ? max(insets.leading, 16) + 8 : 16)
                         Spacer()
                     }
-                    .opacity(0.7)
+                    .opacity(0.75)
                 }
             }
             .environment(\.layoutDirection, .leftToRight)
@@ -211,10 +284,16 @@ struct LessonPlayerView: View {
                 .onEnded { _ in dragEnded() }
         )
         .simultaneousGesture(
-            MagnificationGesture().onEnded { s in
-                withAnimation { pm.fill = s > 1 }
-                flashText(s > 1 ? "ملء الشاشة" : "الحجم الأصلي")
-            }
+            MagnificationGesture()
+                .onChanged { s in zoom = min(max(lastZoom * s, 1), 4) }
+                .onEnded { _ in
+                    lastZoom = zoom
+                    if zoom < 1.05 {
+                        withAnimation(.easeOut(duration: 0.2)) { zoom = 1; lastZoom = 1; pan = .zero; lastPan = .zero }
+                    } else {
+                        flashText(String(format: "تكبير %.1fx", Double(zoom)))
+                    }
+                }
         )
     }
 
@@ -238,7 +317,9 @@ struct LessonPlayerView: View {
 
     private func dragChanged(_ v: DragGesture.Value, size: CGSize) {
         if dragMode == .none {
-            if abs(v.translation.width) > abs(v.translation.height) {
+            if zoom > 1.05 {
+                dragMode = .pan
+            } else if abs(v.translation.width) > abs(v.translation.height) {
                 dragMode = .seek; dragStart = pm.current; scrubbing = true
             } else if v.startLocation.x < size.width / 2 {
                 dragMode = .brightness; dragStart = Double(UIScreen.main.brightness)
@@ -247,13 +328,18 @@ struct LessonPlayerView: View {
             }
         }
         switch dragMode {
+        case .pan:
+            let maxX = size.width * (zoom - 1) / 2
+            let maxY = size.height * (zoom - 1) / 2
+            pan = CGSize(width: min(max(lastPan.width + v.translation.width, -maxX), maxX),
+                         height: min(max(lastPan.height + v.translation.height, -maxY), maxY))
         case .seek:
             let span = min(max(pm.duration, 60), 240)
             let t = max(0, min(dragStart + Double(v.translation.width / max(size.width, 1)) * span, max(pm.duration, 0)))
             scrubValue = t
             let delta = Int(t - dragStart)
             hud = HUDInfo(icon: delta >= 0 ? "goforward" : "gobackward",
-                          text: "\(formatTime(t))  (\(delta >= 0 ? "+" : "-")\(abs(delta))ث)", progress: nil)
+                          text: "\(playerTime(t))  (\(delta >= 0 ? "+" : "-")\(abs(delta))ث)", progress: nil)
         case .brightness:
             let val = max(0, min(dragStart - Double(v.translation.height / max(size.height * 0.8, 1)), 1))
             UIScreen.main.brightness = CGFloat(val)
@@ -268,6 +354,7 @@ struct LessonPlayerView: View {
 
     private func dragEnded() {
         if dragMode == .seek { pm.seek(to: scrubValue); scrubbing = false }
+        if dragMode == .pan { lastPan = pan }
         dragMode = .none
         Task {
             try? await Task.sleep(nanoseconds: 700_000_000)
@@ -278,44 +365,47 @@ struct LessonPlayerView: View {
     // MARK: controls
     private var hasTracks: Bool { !pm.cues.isEmpty || !pm.legibleOptions.isEmpty || pm.audioOptions.count > 1 }
 
-    private var controls: some View {
-        ZStack {
-            LinearGradient(colors: [.black.opacity(0.65), .clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
-                .allowsHitTesting(false)
+    private func controls(insets: EdgeInsets) -> some View {
+        let iconS: CGFloat = full ? 28 : 24
+        let topPad: CGFloat = full ? max(insets.top, 14) + 4 : 10
+        let bottomPad: CGFloat = full ? max(insets.bottom, 10) + 4 : 2
+        let sidePad: CGFloat = full ? max(max(insets.leading, insets.trailing), 16) + 8 : 16
+        return ZStack {
+            Color.black.opacity(0.32).allowsHitTesting(false)
 
-            VStack {
-                HStack(spacing: 8) {
-                    Button { dismiss() } label: { circleIcon("xmark") }
-                    if full, let l = lesson {
-                        Text(l.title).font(.footnote.bold()).foregroundColor(.white).lineLimit(1)
+            VStack(spacing: 0) {
+                HStack(alignment: .center) {
+                    HStack(spacing: full ? 26 : 18) {
+                        if pm.pip != nil {
+                            Button { togglePiP() } label: { Image(systemName: "pip.enter").font(.system(size: iconS - 2)) }
+                        }
+                        AirPlayButton().frame(width: iconS + 6, height: iconS + 6)
+                        if hasTracks { tracksMenu(iconS) }
+                        gearMenu(iconS)
                     }
+                    .foregroundColor(.white)
                     Spacer()
-                    AirPlayButton().frame(width: 34, height: 34)
-                        .background(Color.black.opacity(0.45), in: Circle())
-                    if pm.pip != nil {
-                        Button { togglePiP() } label: { circleIcon("pip.enter") }
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").font(.system(size: iconS * 0.6, weight: .bold)).foregroundColor(.white)
+                            .frame(width: iconS + 16, height: iconS + 16)
+                            .background(Color.white.opacity(0.25), in: Circle())
                     }
-                    if hasTracks { tracksMenu }
-                    gearMenu
-                    speedMenu
                 }
-                .padding(.horizontal, 14).padding(.top, full ? 18 : 10)
+                .padding(.top, topPad)
 
                 Spacer()
 
-                HStack(spacing: full ? 44 : 30) {
+                HStack(spacing: full ? 96 : 66) {
                     Button { if let p = store.previousLesson(before: lessonID) { play(p.id) } } label: {
-                        Image(systemName: "backward.end.fill").font(.title2)
+                        Image(systemName: "backward.end.fill").font(.system(size: full ? 40 : 32))
                     }
                     .opacity(store.previousLesson(before: lessonID) == nil ? 0.35 : 1)
-                    Button { pm.skip(-10); pokeControls() } label: { Image(systemName: "gobackward.10").font(.title) }
                     Button { pm.togglePlay(); pokeControls() } label: {
-                        Image(systemName: pm.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 38))
-                            .frame(width: 66, height: 66)
+                        Image(systemName: pm.isPlaying ? "pause.fill" : "play.fill").font(.system(size: full ? 66 : 50))
+                            .frame(width: full ? 84 : 64, height: full ? 84 : 64)
                     }
-                    Button { pm.skip(10); pokeControls() } label: { Image(systemName: "goforward.10").font(.title) }
                     Button { if let n = store.nextLesson(after: lessonID) { play(n.id) } } label: {
-                        Image(systemName: "forward.end.fill").font(.title2)
+                        Image(systemName: "forward.end.fill").font(.system(size: full ? 40 : 32))
                     }
                     .opacity(store.nextLesson(after: lessonID) == nil ? 0.35 : 1)
                 }
@@ -323,52 +413,39 @@ struct LessonPlayerView: View {
 
                 Spacer()
 
-                VStack(spacing: 2) {
-                    ZStack {
-                        GeometryReader { g in
-                            ForEach(store.bookmarks(of: lessonID)) { b in
-                                if pm.duration > 0 {
-                                    Capsule().fill(Color.yellow)
-                                        .frame(width: 3, height: 12)
-                                        .position(x: 14 + (g.size.width - 28) * CGFloat(min(b.time / pm.duration, 1)), y: g.size.height / 2)
-                                }
-                            }
-                        }
-                        .allowsHitTesting(false)
-                        Slider(
-                            value: Binding(get: { scrubbing ? scrubValue : pm.current }, set: { scrubValue = $0 }),
-                            in: 0...max(pm.duration, 1),
-                            onEditingChanged: { editing in
-                                if editing { scrubbing = true; scrubValue = pm.current }
-                                else { pm.seek(to: scrubValue); scrubbing = false }
-                                pokeControls()
-                            })
-                            .tint(.accentBlue)
-                    }
-                    .frame(height: 28)
-                    HStack(spacing: 20) {
-                        Text("\(formatTime(scrubbing ? scrubValue : pm.current)) / \(formatTime(pm.duration))")
-                            .font(.caption.monospacedDigit()).foregroundColor(.white)
-                        Spacer()
-                        Button { locked = true; withAnimation { showControls = false } } label: {
-                            Image(systemName: "lock.open.fill").foregroundColor(.white)
-                        }
-                        Button { withAnimation { pm.fill.toggle() }; pokeControls() } label: {
-                            Image(systemName: pm.fill ? "arrow.down.right.and.arrow.up.left.circle" : "aspectratio").foregroundColor(.white)
-                        }
-                        Button { addBookmark() } label: { Image(systemName: "bookmark.fill").foregroundColor(.white) }
+                HStack(alignment: .center) {
+                    Text("\(playerTime(scrubbing ? scrubValue : pm.current)) / \(playerTime(pm.duration))")
+                        .font(.system(size: full ? 21 : 16, weight: .medium)).monospacedDigit()
+                        .foregroundColor(.white)
+                    Spacer()
+                    HStack(spacing: full ? 34 : 24) {
+                        Button { addBookmark() } label: { Image(systemName: "bookmark").font(.system(size: iconS)) }
+                        speedMenu(iconS)
                         Button { toggleFullscreen() } label: {
                             Image(systemName: full ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                                .foregroundColor(.white)
+                                .font(.system(size: iconS))
                         }
                     }
+                    .foregroundColor(.white)
                 }
-                .padding(.horizontal, 14).padding(.bottom, full ? 14 : 6)
+                VideoScrubber(
+                    value: scrubbing ? scrubValue : pm.current,
+                    duration: pm.duration,
+                    buffered: pm.buffered,
+                    markers: store.bookmarks(of: lessonID).map { $0.time },
+                    onBegan: { scrubbing = true; scrubValue = pm.current; hideTask?.cancel() },
+                    onChanged: { scrubValue = $0 },
+                    onEnded: { pm.seek(to: $0); scrubbing = false; pokeControls() }
+                )
+                .padding(.horizontal, -sidePad)
+                .padding(.bottom, -4)
             }
+            .padding(.horizontal, sidePad)
+            .padding(.bottom, bottomPad)
         }
     }
 
-    private var tracksMenu: some View {
+    private func tracksMenu(_ s: CGFloat) -> some View {
         Menu {
             Button { pm.disableSubtitles() } label: {
                 Label("بدون ترجمة", systemImage: (!pm.subtitlesOn && pm.selectedLegible == nil) ? "checkmark" : "text.bubble")
@@ -392,15 +469,23 @@ struct LessonPlayerView: View {
                     }
                 }
             }
-        } label: { circleIcon("captions.bubble.fill") }
+        } label: { Image(systemName: "captions.bubble").font(.system(size: s - 2)).foregroundColor(.white) }
     }
 
-    private var gearMenu: some View {
+    private func gearMenu(_ s: CGFloat) -> some View {
         Menu {
             Toggle("تشغيل الدرس التالي تلقائياً", isOn: $autoNext)
             Toggle("تكرار الدرس", isOn: $loopLesson)
             Button { withAnimation { pm.fill.toggle() } } label: {
-                Label(pm.fill ? "احتواء الفيديو" : "ملء الشاشة", systemImage: "aspectratio")
+                Label(pm.fill ? "احتواء الفيديو" : "ملء الشاشة بالفيديو", systemImage: "aspectratio")
+            }
+            if zoom > 1.01 {
+                Button {
+                    withAnimation { zoom = 1; lastZoom = 1; pan = .zero; lastPan = .zero }
+                } label: { Label("إعادة التكبير", systemImage: "arrow.down.right.and.arrow.up.left") }
+            }
+            Button { locked = true; withAnimation { showControls = false } } label: {
+                Label("قفل الشاشة", systemImage: "lock.fill")
             }
             Divider()
             Section("مؤقت النوم") {
@@ -409,10 +494,10 @@ struct LessonPlayerView: View {
                     Button { startSleep(m) } label: { Label("\(m) دقيقة", systemImage: "moon") }
                 }
             }
-        } label: { circleIcon(sleepLabel == nil ? "gearshape.fill" : "moon.fill") }
+        } label: { Image(systemName: sleepLabel == nil ? "gearshape.fill" : "moon.fill").font(.system(size: s - 2)).foregroundColor(.white) }
     }
 
-    private var speedMenu: some View {
+    private func speedMenu(_ s: CGFloat) -> some View {
         Menu {
             ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0], id: \.self) { r in
                 Button {
@@ -422,15 +507,16 @@ struct LessonPlayerView: View {
                 }
             }
         } label: {
-            Text(rateLabel(savedRate)).font(.footnote.bold()).foregroundColor(.white)
-                .padding(.horizontal, 12).frame(height: 34)
-                .background(Color.black.opacity(0.45), in: Capsule())
+            ZStack {
+                Image(systemName: "play.circle").font(.system(size: s))
+                if abs(savedRate - 1) > 0.01 {
+                    Text(rateLabel(savedRate)).font(.system(size: 9, weight: .heavy))
+                        .padding(.horizontal, 3).background(Color.accentBlue, in: Capsule())
+                        .offset(x: 10, y: -12)
+                }
+            }
+            .foregroundColor(.white)
         }
-    }
-
-    private func circleIcon(_ name: String) -> some View {
-        Image(systemName: name).font(.subheadline.bold()).foregroundColor(.white)
-            .frame(width: 34, height: 34).background(Color.black.opacity(0.45), in: Circle())
     }
 
     private func rateLabel(_ r: Double) -> String {
@@ -590,6 +676,7 @@ struct LessonPlayerView: View {
         lessonID = id
         guard let l = store.lesson(id) else { return }
         store.setLast(id)
+        zoom = 1; lastZoom = 1; pan = .zero; lastPan = .zero
         pm.nowTitle = l.title
         pm.nowSub = store.unit(l.unitID)?.title ?? ""
         loadSubtitles()
@@ -686,8 +773,14 @@ struct LessonPlayerView: View {
     }
 
     private func toggleFullscreen() {
-        if full { isFullscreen = false; setOrientation(.portrait) }
-        else { isFullscreen = true; setOrientation(.landscape) }
+        if full {
+            isFullscreen = false
+            if vSize == .compact { setOrientation(.portrait) }
+        } else {
+            isFullscreen = true
+            if pm.videoAspect > 1.05 { setOrientation(.landscape) }
+        }
+        withAnimation { zoom = 1; lastZoom = 1; pan = .zero; lastPan = .zero }
         pokeControls()
     }
 }

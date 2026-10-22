@@ -60,6 +60,8 @@ final class PlayerModel: ObservableObject {
     @Published var isPlaying = false
     @Published var isBuffering = false
     @Published var fill = false
+    @Published var videoSize: CGSize = .zero
+    @Published var buffered: Double = 0
     @Published var holdBoost = false
     @Published var cues: [Cue] = []
     @Published var subtitlesOn = false
@@ -68,6 +70,8 @@ final class PlayerModel: ObservableObject {
     @Published var audioOptions: [AVMediaSelectionOption] = []
     @Published var selectedLegible: AVMediaSelectionOption?
     @Published var selectedAudio: AVMediaSelectionOption?
+
+    var videoAspect: CGFloat { videoSize.width > 0 && videoSize.height > 0 ? videoSize.width / videoSize.height : 0 }
 
     var rate: Float = 1
     var onProgress: ((Double, Double) -> Void)?
@@ -86,6 +90,8 @@ final class PlayerModel: ObservableObject {
     private var endObs: NSObjectProtocol?
     private var statusObs: NSKeyValueObservation?
     private var tcObs: NSKeyValueObservation?
+    private var sizeObs: NSKeyValueObservation?
+    private var bufObs: NSKeyValueObservation?
     private var lastSave: Double = -10
     private var lastNow: Double = -10
     private var remoteSet = false
@@ -124,6 +130,7 @@ final class PlayerModel: ObservableObject {
         duration = 0
         lastSave = startAt
         legibleOptions = []; audioOptions = []
+        videoSize = .zero; buffered = 0
         selectedLegible = nil; selectedAudio = nil
         legibleGroup = nil; audioGroup = nil
         if let e = endObs { NotificationCenter.default.removeObserver(e) }
@@ -141,6 +148,16 @@ final class PlayerModel: ObservableObject {
                 }
                 self?.loadGroups(it)
             }
+        }
+        sizeObs = item.observe(\.presentationSize, options: [.new]) { [weak self] it, _ in
+            DispatchQueue.main.async { self?.videoSize = it.presentationSize }
+        }
+        bufObs = item.observe(\.loadedTimeRanges, options: [.new]) { [weak self] it, _ in
+            let now = it.currentTime().seconds
+            let ranges = it.loadedTimeRanges.map { $0.timeRangeValue }
+            let end = ranges.first(where: { $0.start.seconds <= now + 0.5 && now <= $0.end.seconds + 0.5 })?.end.seconds
+                ?? ranges.last?.end.seconds ?? 0
+            DispatchQueue.main.async { self?.buffered = end.isFinite ? end : 0 }
         }
         if startAt > 1 {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
