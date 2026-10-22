@@ -384,6 +384,13 @@ struct LessonPlayerView: View {
                         gearMenu(iconS)
                     }
                     .foregroundColor(.white)
+                    if full, let l = lesson {
+                        Text(l.title)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .padding(.leading, 18)
+                    }
                     Spacer()
                     Button { dismiss() } label: {
                         Image(systemName: "xmark").font(.system(size: iconS * 0.6, weight: .bold)).foregroundColor(.white)
@@ -478,6 +485,11 @@ struct LessonPlayerView: View {
             Toggle("تكرار الدرس", isOn: $loopLesson)
             Button { withAnimation { pm.fill.toggle() } } label: {
                 Label(pm.fill ? "احتواء الفيديو" : "ملء الشاشة بالفيديو", systemImage: "aspectratio")
+            }
+            if vSize != .compact {
+                Button { withAnimation { isFullscreen.toggle() }; pokeControls() } label: {
+                    Label(isFullscreen ? "تصغير الفيديو" : "تكبير الفيديو (وضع طولي)", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
             }
             if zoom > 1.01 {
                 Button {
@@ -773,14 +785,17 @@ struct LessonPlayerView: View {
     }
 
     private func toggleFullscreen() {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
         if full {
             isFullscreen = false
-            if vSize == .compact { setOrientation(.portrait) }
-        } else {
+            if !isPad { setOrientation(.portrait) }
+        } else if isPad {
             isFullscreen = true
-            if pm.videoAspect > 1.05 { setOrientation(.landscape) }
+        } else {
+            // rotate the whole screen; the layout switches by itself when the size class changes
+            setOrientation(.landscape)
         }
-        withAnimation { zoom = 1; lastZoom = 1; pan = .zero; lastPan = .zero }
+        zoom = 1; lastZoom = 1; pan = .zero; lastPan = .zero
         pokeControls()
     }
 }
