@@ -42,19 +42,21 @@ struct HomeView: View {
                             VStack(spacing: 14) {
                                 Image(systemName: "books.vertical.fill").font(.system(size: 60)).foregroundColor(.white.opacity(0.25))
                                 Text("ما فيه مواد بعد").font(.title3.bold()).foregroundColor(.white)
-                                Text("أضف مادة، وبعدها وحدات، وبعدها ضيف فيديوهاتك وملفاتك داخلها")
+                                Text("أضف مادة، وبعدها فصول، وبعدها ضيف فيديوهاتك وملفاتك داخلها")
                                     .font(.subheadline).foregroundColor(.dim).multilineTextAlignment(.center)
                             }
                             .padding(.top, 80)
                         }
 
-                        ForEach(store.subjects) { s in
-                            NavigationLink(value: s) { SubjectRow(subject: s) }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button { editing = s } label: { Label("تعديل", systemImage: "pencil") }
-                                    Button(role: .destructive) { toDelete = s } label: { Label("حذف", systemImage: "trash") }
-                                }
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                            ForEach(store.subjects) { s in
+                                NavigationLink(value: s) { SubjectRow(subject: s) }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button { editing = s } label: { Label("تعديل", systemImage: "pencil") }
+                                        Button(role: .destructive) { toDelete = s } label: { Label("حذف", systemImage: "trash") }
+                                    }
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -70,7 +72,7 @@ struct HomeView: View {
                 Button("حذف", role: .destructive) { if let s = toDelete { store.deleteSubject(s) }; toDelete = nil }
                 Button("إلغاء", role: .cancel) { toDelete = nil }
             } message: {
-                Text("راح تنحذف المادة مع كل وحداتها ودروسها وملفاتها.")
+                Text("راح تنحذف المادة مع كل فصولها ودروسها وملفاتها.")
             }
         }
     }
@@ -110,26 +112,41 @@ struct SubjectRow: View {
     var body: some View {
         let p = store.progress(subject: subject.id)
         let lessonCount = store.lessons.filter { $0.subjectID == subject.id }.count
-        HStack(spacing: 14) {
-            SubjectOrb(subject: subject, size: 62)
-            VStack(alignment: .leading, spacing: 7) {
-                Text(subject.name).font(.headline).foregroundColor(.white).lineLimit(1)
-                Text("\(store.units(of: subject.id).count) فصل · \(lessonCount) درس · \(store.fileCount(subject.id)) ملف")
-                    .font(.caption).foregroundColor(.dim)
-                GeometryReader { g in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.1))
-                        Capsule().fill(Palette.gradient(subject.colorIndex)).frame(width: g.size.width * CGFloat(p))
+        ZStack(alignment: .topLeading) {
+            Palette.gradient(subject.colorIndex)
+            Image(systemName: subject.icon)
+                .font(.system(size: 96, weight: .bold))
+                .foregroundColor(.white.opacity(0.16))
+                .rotationEffect(.degrees(-12))
+                .offset(x: -34, y: 38)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            VStack(alignment: .leading, spacing: 6) {
+                Image(systemName: subject.icon)
+                    .font(.title3.bold()).foregroundColor(.white)
+                    .frame(width: 42, height: 42)
+                    .background(.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                Spacer(minLength: 6)
+                Text(subject.name).font(.headline.bold()).foregroundColor(.white).lineLimit(2).multilineTextAlignment(.leading)
+                Text("\(store.units(of: subject.id).count) فصل · \(lessonCount) درس")
+                    .font(.caption).foregroundColor(.white.opacity(0.85))
+                HStack(spacing: 8) {
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.black.opacity(0.25))
+                            Capsule().fill(Color.white).frame(width: g.size.width * CGFloat(p))
+                        }
                     }
+                    .frame(height: 5)
+                    Text("\(Int(p * 100))%").font(.caption2.bold()).foregroundColor(.white)
                 }
-                .frame(height: 5)
             }
-            Spacer(minLength: 0)
-            Text("\(Int(p * 100))%").font(.subheadline.bold()).foregroundColor(.white.opacity(0.85))
+            .padding(14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(14)
-        .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
+        .frame(height: 172)
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.white.opacity(0.18), lineWidth: 1))
+        .shadow(color: Palette.glow(subject.colorIndex).opacity(0.35), radius: 14, y: 8)
     }
 }
 

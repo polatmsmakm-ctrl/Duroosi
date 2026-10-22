@@ -319,26 +319,38 @@ struct SubjectView: View {
     private func lessonRow(_ l: Lesson, isFirst: Bool, isLast: Bool) -> some View {
         Button { playTarget = PlayTarget(id: l.id) } label: {
             HStack(spacing: 12) {
-                ZStack {
-                    VStack(spacing: 0) {
-                        Rectangle().fill(isFirst ? Color.clear : Color.accentBlue.opacity(0.6)).frame(width: 2)
-                        Rectangle().fill(isLast ? Color.clear : Color.accentBlue.opacity(0.6)).frame(width: 2)
-                    }
-                    ProgressRing(progress: l.progress, size: 26)
-                }
-                .frame(width: 28)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(l.title).font(.subheadline.weight(.medium)).foregroundColor(.white).multilineTextAlignment(.leading).lineLimit(2)
+                ZStack(alignment: .bottom) {
+                    LessonThumb(url: store.url(for: l.fileName))
                     if l.duration > 0 {
-                        Text(l.isDone ? "مكتمل" : (l.position > 1 ? "تابع من \(formatTime(l.position))" : formatTime(l.duration)))
+                        GeometryReader { g in
+                            Rectangle().fill(Color.white.opacity(0.25))
+                                .overlay(alignment: .leading) {
+                                    Rectangle().fill(l.isDone ? Color.doneGreen : Color.accentBlue)
+                                        .frame(width: g.size.width * CGFloat(l.progress))
+                                }
+                        }
+                        .frame(height: 3)
+                    }
+                    Image(systemName: l.isDone ? "checkmark.circle.fill" : "play.fill")
+                        .font(.system(size: l.isDone ? 20 : 15))
+                        .foregroundColor(l.isDone ? .doneGreen : .white)
+                        .shadow(radius: 4)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(width: 112, height: 66)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(l.title).font(.subheadline.weight(.semibold)).foregroundColor(.white)
+                        .multilineTextAlignment(.leading).lineLimit(2)
+                    if l.duration > 0 {
+                        Text(l.isDone ? "مكتمل · \(formatTime(l.duration))" : (l.position > 1 ? "تابع من \(formatTime(l.position)) · \(formatTime(l.duration))" : formatTime(l.duration)))
                             .font(.caption2).foregroundColor(l.isDone ? .doneGreen : .dim)
                     }
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.left").font(.caption.bold()).foregroundColor(.dim)
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

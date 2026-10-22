@@ -130,35 +130,50 @@ struct BusyOverlay: View {
 }
 
 
-struct DocumentPicker: UIViewControllerRepresentable {
+struct DocPickerHost: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
     let types: [UTType]
-    var asCopy: Bool = true
+    let asCopy: Bool
     let onPick: ([URL]) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(onPick) }
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let p = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: asCopy)
-        p.allowsMultipleSelection = true
-        p.delegate = context.coordinator
-        return p
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIViewController(context: Context) -> UIViewController { UIViewController() }
+    func updateUIViewController(_ vc: UIViewController, context: Context) {
+        let c = context.coordinator
+        c.parent = self
+        if isPresented, !c.showing {
+            c.showing = true
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: asCopy)
+            picker.allowsMultipleSelection = true
+            picker.delegate = c
+            DispatchQueue.main.async {
+                var top: UIViewController? = vc.view.window?.rootViewController
+                    ?? UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }.first
+                while let p = top?.presentedViewController { top = p }
+                if let top { top.present(picker, animated: true) } else { c.showing = false; isPresented = false }
+            }
+        }
     }
-    func updateUIViewController(_ vc: UIDocumentPickerViewController, context: Context) {}
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onPick: ([URL]) -> Void
-        init(_ f: @escaping ([URL]) -> Void) { onPick = f }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { onPick(urls) }
+        var parent: DocPickerHost?
+        var showing = false
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            showing = false
+            parent?.isPresented = false
+            parent?.onPick(urls)
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            showing = false
+            parent?.isPresented = false
+        }
     }
 }
 
 extension View {
     func documentPicker(isPresented: Binding<Bool>, types: [UTType], asCopy: Bool = true,
                         onPick: @escaping ([URL]) -> Void) -> some View {
-        sheet(isPresented: isPresented) {
-            DocumentPicker(types: types, asCopy: asCopy) { urls in
-                isPresented.wrappedValue = false
-                onPick(urls)
-            }
-            .ignoresSafeArea()
-        }
+        background(DocPickerHost(isPresented: isPresented, types: types, asCopy: asCopy, onPick: onPick)
+            .frame(width: 0, height: 0))
     }
     func toast(_ text: Binding<String?>) -> some View { modifier(ToastModifier(text: text)) }
 }

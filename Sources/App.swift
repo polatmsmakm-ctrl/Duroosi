@@ -17,6 +17,7 @@ struct DuroosiApp: App {
                 .environment(\.layoutDirection, .rightToLeft)
                 .preferredColorScheme(.dark)
                 .tint(.accentBlue)
+                .onAppear { store.fixTitles() }
         }
     }
 }

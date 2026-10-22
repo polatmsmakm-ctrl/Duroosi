@@ -283,6 +283,24 @@ final class Store: ObservableObject {
         return name
     }
 
+    nonisolated static func looksGenerated(_ t: String) -> Bool {
+        let h = t.replacingOccurrences(of: "-", with: "")
+        if h.count >= 28, h.allSatisfy({ $0.isHexDigit }) { return true }
+        return t.hasPrefix("IMG_") && false
+    }
+
+    func fixTitles() {
+        var changed = false
+        for u in units {
+            var n = 0
+            for i in lessons.indices where lessons[i].unitID == u.id {
+                n += 1
+                if Store.looksGenerated(lessons[i].title) { lessons[i].title = "درس \(n)"; changed = true }
+            }
+        }
+        if changed { save() }
+    }
+
     private func describe(_ e: Error) -> String {
         let ns = e as NSError
         return "\(ns.localizedDescription) [\(ns.domain) \(ns.code)]"
@@ -293,7 +311,8 @@ final class Store: ObservableObject {
         guard let u = unit(unitID) else { return 0 }
         var count = 0
         for url in urls {
-            let title = url.deletingPathExtension().lastPathComponent
+            var title = url.deletingPathExtension().lastPathComponent
+            if Store.looksGenerated(title) { title = "درس \(lessons.filter { $0.unitID == unitID }.count + 1)" }
             let result = await Task.detached { () -> Result<String, Error> in
                 Result { try Store.copyIn(url) }
             }.value
