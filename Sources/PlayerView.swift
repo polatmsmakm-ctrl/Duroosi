@@ -184,6 +184,9 @@ struct LessonPlayerView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             setOrientation(.portrait)
         }
+        .onChange(of: pm.pipMessage) { m in
+            if let m { toastText = m; pm.pipMessage = nil }
+        }
         .onChange(of: pm.isPlaying) { playing in
             UIApplication.shared.isIdleTimerDisabled = playing
             pm.updateNowPlaying()
@@ -919,8 +922,16 @@ struct LessonPlayerView: View {
     }
 
     private func togglePiP() {
-        guard let c = pm.pip else { return }
-        if c.isPictureInPictureActive { c.stopPictureInPicture() } else { c.startPictureInPicture() }
+        guard let c = pm.pip else { toastText = "PiP غير مدعوم على هذا الجهاز"; return }
+        if c.isPictureInPictureActive { c.stopPictureInPicture(); return }
+        if !c.isPictureInPicturePossible {
+            dlog("PiP غير ممكن حالياً (possible=false)")
+            toastText = "PiP مو جاهز الحين، شغّل الفيديو ثواني وجرّب"
+            return
+        }
+        if !pm.isPlaying { pm.player.play(); pm.player.rate = pm.rate }
+        dlog("طلب بدء PiP")
+        c.startPictureInPicture()
     }
 
     private func startSleep(_ minutes: Int) {

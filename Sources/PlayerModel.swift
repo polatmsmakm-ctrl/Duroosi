@@ -55,8 +55,19 @@ struct VolumeHost: UIViewRepresentable {
 
 final class PiPDelegate: NSObject, AVPictureInPictureControllerDelegate {
     weak var model: PlayerModel?
+    func pictureInPictureControllerWillStartPictureInPicture(_ c: AVPictureInPictureController) {
+        dlog("PiP: على وشك البدء")
+    }
     func pictureInPictureControllerDidStartPictureInPicture(_ c: AVPictureInPictureController) {
-        DispatchQueue.main.async { self.model?.onPiPStart?() }
+        dlog("PiP: بدأ")
+        DispatchQueue.main.async {
+            self.model?.parkHostView()
+            self.model?.onPiPStart?()
+        }
+    }
+    func pictureInPictureController(_ c: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        dlog("PiP فشل: \(error.localizedDescription)")
+        DispatchQueue.main.async { self.model?.pipMessage = "تعذّر فتح PiP: \(error.localizedDescription)" }
     }
     func pictureInPictureController(_ c: AVPictureInPictureController,
                                     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
@@ -67,6 +78,7 @@ final class PiPDelegate: NSObject, AVPictureInPictureControllerDelegate {
         completionHandler(true)
     }
     func pictureInPictureControllerDidStopPictureInPicture(_ c: AVPictureInPictureController) {
+        dlog("PiP: توقف")
         DispatchQueue.main.async {
             guard let m = self.model else { return }
             let wasRestore = m.restoring
@@ -80,6 +92,17 @@ final class PlayerModel: ObservableObject {
     static let shared = PlayerModel()
     let player = AVPlayer()
     @Published var restoreLessonID: UUID?
+    @Published var pipMessage: String?
+    /// يخلي طبقة الفيديو داخل النافذة (صغيرة جداً) عشان PiP يظل شغّال بعد إغلاق المشغّل.
+    func parkHostView() {
+        guard let win = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
+        let v = hostView
+        win.addSubview(v)
+        v.frame = CGRect(x: 0, y: 0, width: 2, height: 2)
+        v.alpha = 0.02
+        v.isUserInteractionEnabled = false
+    }
     var currentLessonID: UUID?
     var viewVisible = false
     var restoring = false
@@ -167,6 +190,8 @@ final class PlayerModel: ObservableObject {
 
     // MARK: loading
     func load(url: URL, startAt: Double) {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try? AVAudioSession.sharedInstance().setActive(true)
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         current = startAt
@@ -349,6 +374,8 @@ struct PlayerLayerView: UIViewRepresentable {
     let fill: Bool
     func makeUIView(context: Context) -> PlayerUIView {
         let v = model.hostView
+        v.alpha = 1
+        v.isUserInteractionEnabled = true
         v.playerLayer.videoGravity = fill ? .resizeAspectFill : .resizeAspect
         return v
     }
