@@ -53,8 +53,51 @@ struct VolumeHost: UIViewRepresentable {
     func updateUIView(_ v: MPVolumeView, context: Context) {}
 }
 
+final class PiPDelegate: NSObject, AVPictureInPictureControllerDelegate {
+    weak var model: PlayerModel?
+    func pictureInPictureControllerDidStartPictureInPicture(_ c: AVPictureInPictureController) {
+        DispatchQueue.main.async { self.model?.onPiPStart?() }
+    }
+    func pictureInPictureController(_ c: AVPictureInPictureController,
+                                    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        DispatchQueue.main.async {
+            self.model?.restoring = true
+            if let id = self.model?.currentLessonID { self.model?.restoreLessonID = id }
+        }
+        completionHandler(true)
+    }
+    func pictureInPictureControllerDidStopPictureInPicture(_ c: AVPictureInPictureController) {
+        DispatchQueue.main.async {
+            guard let m = self.model else { return }
+            let wasRestore = m.restoring
+            m.restoring = false
+            if !wasRestore && !m.viewVisible { m.stop() }
+        }
+    }
+}
+
 final class PlayerModel: ObservableObject {
+    static let shared = PlayerModel()
     let player = AVPlayer()
+    @Published var restoreLessonID: UUID?
+    var currentLessonID: UUID?
+    var viewVisible = false
+    var restoring = false
+    var onPiPStart: (() -> Void)?
+    let pipDelegate = PiPDelegate()
+    lazy var hostView: PlayerUIView = {
+        let v = PlayerUIView()
+        v.backgroundColor = .black
+        v.playerLayer.player = player
+        if AVPictureInPictureController.isPictureInPictureSupported() {
+            let c = AVPictureInPictureController(playerLayer: v.playerLayer)
+            c?.canStartPictureInPictureAutomaticallyFromInline = true
+            pipDelegate.model = self
+            c?.delegate = pipDelegate
+            pip = c
+        }
+        return v
+    }()
     @Published var current: Double = 0
     @Published var duration: Double = 0
     @Published var isPlaying = false
@@ -249,6 +292,7 @@ final class PlayerModel: ObservableObject {
         pendingWatch = 0
         player.pause()
         player.replaceCurrentItem(with: nil)
+        currentLessonID = nil
         teardownRemote()
     }
 
@@ -304,15 +348,8 @@ struct PlayerLayerView: UIViewRepresentable {
     let model: PlayerModel
     let fill: Bool
     func makeUIView(context: Context) -> PlayerUIView {
-        let v = PlayerUIView()
-        v.backgroundColor = .black
-        v.playerLayer.player = model.player
+        let v = model.hostView
         v.playerLayer.videoGravity = fill ? .resizeAspectFill : .resizeAspect
-        if AVPictureInPictureController.isPictureInPictureSupported() {
-            let c = AVPictureInPictureController(playerLayer: v.playerLayer)
-            c?.canStartPictureInPictureAutomaticallyFromInline = true
-            model.pip = c
-        }
         return v
     }
     func updateUIView(_ v: PlayerUIView, context: Context) {

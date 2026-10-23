@@ -2,6 +2,13 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 
+struct LessonDrag: Codable, Transferable {
+    var id: UUID
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .json)
+    }
+}
+
 private enum RenameKind { case newUnit(UUID), unit(CourseUnit), lesson(Lesson) }
 
 struct SubjectView: View {
@@ -16,6 +23,7 @@ struct SubjectView: View {
     @State private var scrollTarget: UUID?
     @State private var bulkUnit: PlayTarget?
     @State private var showFolderImporter = false
+    @State private var reorderUnit: PlayTarget?
 
     @State private var showPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
@@ -100,6 +108,7 @@ struct SubjectView: View {
                 toastText = n > 0 ? "تمت إضافة \(n) فيديو ✓" : ("تعذّر: " + (store.lastImportError ?? "استيراد المجلد"))
             }
         }
+        .sheet(item: $reorderUnit) { t in ReorderView(unitID: t.id) }
         .sheet(item: $bulkUnit) { t in BulkRenameView(unitID: t.id) }
         .sheet(item: $quizRun) { t in QuizRunnerView(unitID: t.id) }
         .sheet(item: $quizEdit) { t in QuizEditorView(unitID: t.id) }
@@ -277,6 +286,7 @@ struct SubjectView: View {
                     Button { targetUnit = u.id; showVideoImporter = true } label: { Label("إضافة فيديو من الملفات", systemImage: "folder") }
                     Button { targetUnit = u.id; showFolderImporter = true } label: { Label("إضافة مجلد كامل", systemImage: "folder.badge.plus") }
                     Button { bulkUnit = PlayTarget(id: u.id) } label: { Label("تعديل عناوين الفيديوهات", systemImage: "text.badge.checkmark") }
+                    Button { reorderUnit = PlayTarget(id: u.id) } label: { Label("ترتيب الفيديوهات", systemImage: "arrow.up.arrow.down") }
                     Divider()
                     Button { quizEdit = PlayTarget(id: u.id) } label: { Label("أسئلة اختبار الفصل", systemImage: "checklist") }
                     Button { renameText = u.title; renameKind = .unit(u) } label: { Label("تغيير اسم الفصل", systemImage: "pencil") }
@@ -318,6 +328,13 @@ struct SubjectView: View {
         .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 1))
         .clipped()
+        .dropDestination(for: LessonDrag.self) { items, _ in
+            guard let d = items.first else { return false }
+            store.moveLesson(id: d.id, toUnit: u.id, before: nil)
+            withAnimation { _ = expanded.insert(u.id) }
+            haptic()
+            return true
+        }
     }
 
     private func quizRow(_ u: CourseUnit) -> some View {
@@ -359,6 +376,17 @@ struct SubjectView: View {
                     .frame(width: 34, height: 48).contentShape(Rectangle())
             }
         }
+        .draggable(LessonDrag(id: l.id)) {
+            Text(l.title).font(.subheadline.bold()).foregroundColor(.white).lineLimit(1)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(Color.accentBlue, in: Capsule())
+        }
+        .dropDestination(for: LessonDrag.self) { items, _ in
+            guard let d = items.first else { return false }
+            store.moveLesson(id: d.id, toUnit: l.unitID, before: l.id)
+            haptic()
+            return true
+        }
     }
 
     private func lessonButton(_ l: Lesson, isFirst: Bool, isLast: Bool) -> some View {
@@ -399,15 +427,6 @@ struct SubjectView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            Button { store.toggleDone(l) } label: {
-                Label(l.isDone ? "إلغاء الإكمال" : "تعليم كمكتمل", systemImage: "checkmark.circle")
-            }
-            Button { renameText = l.title; renameKind = .lesson(l) } label: { Label("تغيير الاسم", systemImage: "pencil") }
-            Button { store.moveLesson(l, by: -1) } label: { Label("نقل للأعلى", systemImage: "arrow.up") }
-            Button { store.moveLesson(l, by: 1) } label: { Label("نقل للأسفل", systemImage: "arrow.down") }
-            Button(role: .destructive) { lessonToDelete = l } label: { Label("حذف الدرس", systemImage: "trash") }
-        }
     }
 
     // MARK: helpers
@@ -476,6 +495,37 @@ struct BulkRenameView: View {
                 .scrollDismissesKeyboard(.interactively)
             }
             .navigationTitle("تعديل العناوين")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("تم") { dismiss() } } }
+        }
+    }
+}
+
+
+struct ReorderView: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
+    let unitID: UUID
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+                List {
+                    ForEach(store.lessons(in: unitID)) { l in
+                        HStack(spacing: 12) {
+                            LessonThumb(url: store.url(for: l.fileName))
+                                .frame(width: 76, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            Text(l.title).foregroundColor(.white).lineLimit(2)
+                        }
+                        .listRowBackground(Color.cardBg)
+                    }
+                    .onMove { from, to in store.moveLessons(in: unitID, from: from, to: to) }
+                }
+                .scrollContentBackground(.hidden)
+                .environment(\.editMode, .constant(.active))
+            }
+            .navigationTitle("ترتيب الفيديوهات")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("تم") { dismiss() } } }
         }

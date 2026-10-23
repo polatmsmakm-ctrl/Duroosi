@@ -39,11 +39,107 @@ enum Reminders {
 
 // MARK: - Root
 
+struct LaunchView: View {
+    @EnvironmentObject var store: Store
+    let lesson: Lesson
+    let onContinue: () -> Void
+    let onSkip: () -> Void
+
+    var body: some View {
+        let subjectName = store.subject(lesson.subjectID)?.name ?? ""
+        let unitName = store.unit(lesson.unitID)?.title ?? ""
+        let due = store.dueCards().count
+        ZStack {
+            AppBackground()
+            VStack(spacing: 18) {
+                Spacer(minLength: 20)
+                Text("أهلاً بك في دروسي").font(.system(size: 30, weight: .heavy)).foregroundColor(.white)
+                Text("كمّل من حيث وقفت").font(.subheadline).foregroundColor(.dim)
+
+                VStack(spacing: 0) {
+                    ZStack {
+                        LessonThumb(url: store.url(for: lesson.fileName))
+                        Color.black.opacity(0.25)
+                        Image(systemName: "play.circle.fill").font(.system(size: 62)).foregroundColor(.white.opacity(0.95)).shadow(radius: 8)
+                    }
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .clipped()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(subjectName + (unitName.isEmpty ? "" : " › " + unitName)).font(.caption).foregroundColor(.dim).lineLimit(1)
+                        Text(lesson.title).font(.title3.bold()).foregroundColor(.white).lineLimit(2)
+                        if lesson.duration > 0 {
+                            GeometryReader { g in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.white.opacity(0.15))
+                                    Capsule().fill(Color.accentBlue).frame(width: g.size.width * CGFloat(lesson.progress))
+                                }
+                            }
+                            .frame(height: 5)
+                            Text(lesson.position > 1 ? "وصلت إلى \(formatTime(lesson.position)) من \(formatTime(lesson.duration))" : "مدة الدرس \(formatTime(lesson.duration))")
+                                .font(.caption).foregroundColor(.dim)
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                .frame(maxWidth: 560)
+
+                Button(action: onContinue) {
+                    Label("كمّل الدرس", systemImage: "play.fill")
+                        .font(.title3.bold()).foregroundColor(.white)
+                        .frame(maxWidth: .infinity).padding(.vertical, 18)
+                        .background(LinearGradient(colors: [Color.accentBlue, Color.goldDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                }
+                .frame(maxWidth: 560)
+
+                Button(action: onSkip) {
+                    Text(due > 0 ? "تصفّح المواد · \(due) بطاقة للمراجعة" : "تصفّح المواد")
+                        .font(.subheadline.bold()).foregroundColor(.white.opacity(0.85))
+                        .padding(.vertical, 8)
+                }
+                Spacer(minLength: 20)
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+}
+
 struct RootView: View {
     @EnvironmentObject var store: Store
     @Environment(\.scenePhase) private var phase
+    @ObservedObject private var hub = PlayerModel.shared
+    @AppStorage("showLaunch") private var launchEnabled = true
+    @State private var showLaunch = true
+    @State private var launchPlay: PlayTarget?
+    @State private var restoreTarget: PlayTarget?
 
     var body: some View {
+        ZStack {
+            tabs
+            if showLaunch && launchEnabled, let l = store.globalContinue() {
+                LaunchView(lesson: l,
+                           onContinue: { withAnimation(.easeInOut(duration: 0.25)) { showLaunch = false }; launchPlay = PlayTarget(id: l.id) },
+                           onSkip: { withAnimation(.easeInOut(duration: 0.25)) { showLaunch = false } })
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
+        }
+        .fullScreenCover(item: $launchPlay) { t in LessonPlayerView(lessonID: t.id) }
+        .fullScreenCover(item: $restoreTarget) { t in LessonPlayerView(lessonID: t.id) }
+        .onChange(of: hub.restoreLessonID) { id in
+            if let id {
+                showLaunch = false
+                restoreTarget = PlayTarget(id: id)
+                hub.restoreLessonID = nil
+            }
+        }
+    }
+
+    private var tabs: some View {
         TabView {
             HomeView()
                 .tabItem { Label("المواد", systemImage: "books.vertical.fill") }
@@ -245,6 +341,7 @@ struct ProgressTab: View {
                         .padding(.top, 8)
 
                         StatsCard()
+                        FlashcardsEntry()
                         weekChart
 
                         let recent = store.recentLessons(limit: 6)
@@ -317,6 +414,7 @@ struct SettingsTab: View {
     @AppStorage("reminderMinute") private var minute = 0
     @AppStorage("autoNext") private var autoNext = true
     @AppStorage("loopLesson") private var loopLesson = false
+    @AppStorage("showLaunch") private var launchEnabled = true
     @State private var denied = false
     @State private var backups: [BackupInfo] = []
     @State private var backupBusy = false
@@ -379,6 +477,11 @@ struct SettingsTab: View {
                         }
                     } header: { Text("التذكير") } footer: {
                         Text("يوصلك إشعار كل يوم بالوقت اللي تحدده، ويذكّرك بالدرس اللي وقفت عنده.")
+                    }
+                    .listRowBackground(Color.cardBg)
+
+                    Section("عام") {
+                        Toggle("شاشة البداية عند فتح التطبيق", isOn: $launchEnabled)
                     }
                     .listRowBackground(Color.cardBg)
 

@@ -70,7 +70,8 @@ struct LessonPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.verticalSizeClass) private var vSize
     @Environment(\.horizontalSizeClass) private var hSize
-    @StateObject private var pm = PlayerModel()
+    @ObservedObject private var pm = PlayerModel.shared
+    @State private var startOverride: Double?
     @State private var lessonID: UUID
     @AppStorage("playbackRate") private var savedRate: Double = 1.0
     @AppStorage("autoNext") private var autoNext = true
@@ -108,7 +109,10 @@ struct LessonPlayerView: View {
     @FocusState private var notesFocused: Bool
     @State private var bookmarkText = ""
 
-    init(lessonID: UUID) { _lessonID = State(initialValue: lessonID) }
+    init(lessonID: UUID, startAt: Double? = nil) {
+        _lessonID = State(initialValue: lessonID)
+        _startOverride = State(initialValue: startAt)
+    }
 
     private var lesson: Lesson? { store.lesson(lessonID) }
     private var full: Bool { isFullscreen || vSize == .compact }
@@ -157,10 +161,23 @@ struct LessonPlayerView: View {
             pm.onNext = { if let n = store.nextLesson(after: lessonID) { play(n.id) } }
             pm.onPrev = { if let p = store.previousLesson(before: lessonID) { play(p.id) } }
             pm.setupRemote()
-            play(lessonID)
+            _ = pm.hostView
+            pm.viewVisible = true
+            pm.onPiPStart = { dismiss() }
+            let pipWasActive = pm.pip?.isPictureInPictureActive ?? false
+            if pipWasActive { pm.pip?.stopPictureInPicture() }
+            if pm.currentLessonID == lessonID, pm.player.currentItem != nil, startOverride == nil {
+                if let l = store.lesson(lessonID) { pm.nowTitle = l.title; pm.nowSub = store.unit(l.unitID)?.title ?? "" }
+                loadSubtitles()
+                pokeControls()
+            } else {
+                play(lessonID)
+            }
         }
         .onDisappear {
-            pm.stop()
+            pm.viewVisible = false
+            pm.onPiPStart = nil
+            if !(pm.pip?.isPictureInPictureActive ?? false) { pm.stop() }
             hideTask?.cancel()
             sleepTask?.cancel()
             countTask?.cancel()
@@ -826,7 +843,10 @@ struct LessonPlayerView: View {
         pm.nowTitle = l.title
         pm.nowSub = store.unit(l.unitID)?.title ?? ""
         loadSubtitles()
-        pm.load(url: store.url(for: l.fileName), startAt: l.isDone ? 0 : l.position)
+        pm.currentLessonID = id
+        let start = startOverride ?? (l.isDone ? 0 : l.position)
+        startOverride = nil
+        pm.load(url: store.url(for: l.fileName), startAt: start)
         pokeControls()
     }
 

@@ -26,6 +26,23 @@ struct Lesson: Identifiable, Codable, Hashable {
     var isDone: Bool { progress > 0.95 }
 }
 
+struct Flashcard: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var front: String
+    var back: String
+    var lessonID: UUID? = nil
+    var time: Double? = nil
+    var bookmarkID: UUID? = nil
+    var due: Date = Date()
+    var interval: Double = 0      // days
+    var ease: Double = 2.4
+    var reps: Int = 0
+}
+
+enum Grade: Int, CaseIterable { case again, hard, good, easy
+    var title: String { ["نسيتها", "صعبة", "جيدة", "سهلة"][rawValue] }
+}
+
 struct BackupInfo: Identifiable, Hashable {
     let url: URL
     var id: String { url.path }
@@ -99,6 +116,7 @@ final class Store: ObservableObject {
     @Published var lessonNotes: [String: String] = [:]
     @Published var studyLog: [String: Double] = [:]
     @Published var subjectPrefs: [String: SubjectPrefs] = [:]
+    @Published var flashcards: [Flashcard] = []
     @Published var importStatus: String?
     @Published var logLines: [String] = []
     private var logObs: NSObjectProtocol?
@@ -120,6 +138,7 @@ final class Store: ObservableObject {
         var lessonNotes: [String: String]?
         var studyLog: [String: Double]?
         var subjectPrefs: [String: SubjectPrefs]?
+        var flashcards: [Flashcard]?
     }
 
     // old v1 format (migration)
@@ -150,6 +169,7 @@ final class Store: ObservableObject {
             bookmarks = lib.bookmarks ?? []; questions = lib.questions ?? []
             lessonNotes = lib.lessonNotes ?? [:]; studyLog = lib.studyLog ?? [:]
             subjectPrefs = lib.subjectPrefs ?? [:]
+            flashcards = lib.flashcards ?? []
             return
         }
         if let data = try? Data(contentsOf: oldURL),
@@ -175,7 +195,7 @@ final class Store: ObservableObject {
 
     func save() {
         let lib = Library(subjects: subjects, units: units, lessons: lessons, files: files, lastLessonID: lastLessonID,
-                      bookmarks: bookmarks, questions: questions, lessonNotes: lessonNotes, studyLog: studyLog, subjectPrefs: subjectPrefs)
+                      bookmarks: bookmarks, questions: questions, lessonNotes: lessonNotes, studyLog: studyLog, subjectPrefs: subjectPrefs, flashcards: flashcards)
         if let data = try? JSONEncoder().encode(lib) { try? data.write(to: libURL, options: .atomic) }
     }
 
@@ -570,6 +590,80 @@ final class Store: ObservableObject {
         guard np >= 0, np < ids.count else { return }
         lessons.swapAt(ids[pos], ids[np]); save()
     }
+    /// نقل درس (بالسحب) إلى فصل، قبل درس معيّن أو في آخر الفصل.
+    func moveLesson(id: UUID, toUnit uid: UUID, before target: UUID?) {
+        guard let from = lessons.firstIndex(where: { $0.id == id }), let u = unit(uid) else { return }
+        if target == id { return }
+        var l = lessons.remove(at: from)
+        l.unitID = uid
+        l.subjectID = u.subjectID
+        if let t = target, let ti = lessons.firstIndex(where: { $0.id == t }) {
+            lessons.insert(l, at: ti)
+        } else {
+            lessons.append(l)
+        }
+        save()
+    }
+    /// ترتيب دروس فصل (للقائمة اللي فيها onMove).
+    func moveLessons(in uid: UUID, from: IndexSet, to: Int) {
+        let slots = lessons.indices.filter { lessons[$0].unitID == uid }
+        var arr = slots.map { lessons[$0] }
+        arr.move(fromOffsets: from, toOffset: to)
+        for (k, s) in slots.enumerated() { lessons[s] = arr[k] }
+        save()
+    }
+
+    // MARK: flashcards
+    func dueCards(now: Date = Date()) -> [Flashcard] {
+        flashcards.filter { $0.due <= now }.sorted { $0.due < $1.due }
+    }
+    func addCard(front: String, back: String, lessonID: UUID? = nil, time: Double? = nil, bookmarkID: UUID? = nil) {
+        flashcards.append(Flashcard(front: front, back: back, lessonID: lessonID, time: time, bookmarkID: bookmarkID))
+        save()
+    }
+    func deleteCard(_ c: Flashcard) { flashcards.removeAll { $0.id == c.id }; save() }
+    func updateCard(_ c: Flashcard) {
+        guard let i = flashcards.firstIndex(where: { $0.id == c.id }) else { return }
+        flashcards[i] = c; save()
+    }
+    @discardableResult
+    func generateCardsFromBookmarks() -> Int {
+        var n = 0
+        for b in bookmarks where !b.note.trimmingCharacters(in: .whitespaces).isEmpty {
+            if flashcards.contains(where: { $0.bookmarkID == b.id }) { continue }
+            let l = lesson(b.lessonID)
+            let back = (l?.title ?? "") + " — عند " + formatTime(b.time)
+            flashcards.append(Flashcard(front: b.note, back: back, lessonID: b.lessonID, time: b.time, bookmarkID: b.id))
+            n += 1
+        }
+        if n > 0 { save() }
+        return n
+    }
+    /// الفاصل الجاي (بالأيام) لكل تقييم، للعرض على الأزرار.
+    func nextInterval(_ c: Flashcard, _ g: Grade) -> Double {
+        switch g {
+        case .again: return 0
+        case .hard: return max(1, c.interval * 1.2)
+        case .good: return c.reps == 0 ? 1 : (c.reps == 1 ? 3 : max(c.interval * c.ease, c.interval + 1))
+        case .easy: return c.reps == 0 ? 3 : max(c.interval * c.ease * 1.3, c.interval + 2)
+        }
+    }
+    func rate(_ c: Flashcard, _ g: Grade) {
+        guard let i = flashcards.firstIndex(where: { $0.id == c.id }) else { return }
+        var x = flashcards[i]
+        let days = nextInterval(c, g)
+        switch g {
+        case .again: x.reps = 0; x.ease = max(1.3, x.ease - 0.2)
+        case .hard: x.ease = max(1.3, x.ease - 0.15); x.reps += 1
+        case .good: x.reps += 1
+        case .easy: x.ease += 0.15; x.reps += 1
+        }
+        x.interval = days
+        x.due = days == 0 ? Date().addingTimeInterval(600) : Date().addingTimeInterval(days * 86400)
+        flashcards[i] = x
+        save()
+    }
+
     func updateProgress(_ id: UUID, position: Double, duration: Double) {
         guard let i = lessons.firstIndex(where: { $0.id == id }) else { return }
         if abs(lessons[i].position - position) > 0.5 || lessons[i].lastWatched == nil { lessons[i].lastWatched = Date() }

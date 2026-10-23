@@ -30,6 +30,7 @@ struct HomeView: View {
             .padding(.top, 8)
 
             if !store.lessons.isEmpty { StatsCard() }
+            if !store.lessons.isEmpty || !store.flashcards.isEmpty { FlashcardsEntry() }
 
             if let l = store.globalContinue(), let s = store.subject(l.subjectID) {
                 ContinuePill(title: l.title, subtitle: s.name) {

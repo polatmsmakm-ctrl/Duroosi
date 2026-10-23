@@ -2,9 +2,9 @@ import SwiftUI
 import UIKit
 
 extension Color {
-    static let appBg = Color(red: 0.04, green: 0.04, blue: 0.065)
-    static let cardBg = Color(red: 0.07, green: 0.07, blue: 0.11).opacity(0.74)
-    static let cardBg2 = Color(red: 0.13, green: 0.13, blue: 0.20).opacity(0.88)
+    static let appBg = Color(red: 0.02, green: 0.04, blue: 0.10)
+    static let cardBg = Color(red: 0.05, green: 0.10, blue: 0.22).opacity(0.68)
+    static let cardBg2 = Color(red: 0.08, green: 0.16, blue: 0.34).opacity(0.88)
     static let accentBlue = Color(red: 0.91, green: 0.56, blue: 0.20)   // ذهبي كوني
     static let goldDeep = Color(red: 0.66, green: 0.32, blue: 0.10)
     static let doneGreen = Color(red: 0.25, green: 0.80, blue: 0.48)
@@ -54,7 +54,7 @@ struct AppBackground: View {
                         .frame(width: g.size.width, height: g.size.height).clipped()
                 }
             }
-            LinearGradient(colors: [Color.black.opacity(0.30), Color.black.opacity(0.62), Color.black.opacity(0.78)],
+            LinearGradient(colors: [Color.black.opacity(0.10), Color.black.opacity(0.32), Color.black.opacity(0.50)],
                            startPoint: .top, endPoint: .bottom)
         }
         .ignoresSafeArea()
