@@ -61,8 +61,9 @@ final class PiPDelegate: NSObject, AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerDidStartPictureInPicture(_ c: AVPictureInPictureController) {
         dlog("PiP: بدأ")
         DispatchQueue.main.async {
-            self.model?.parkHostView()
-            self.model?.onPiPStart?()
+            guard let m = self.model else { return }
+            // لا نحرّك طبقة الفيديو ولا نقفل المشغّل لحظة بدء PiP (يسبب تجمّد)
+            if m.player.timeControlStatus == .paused { m.player.play(); m.player.rate = m.rate }
         }
     }
     func pictureInPictureController(_ c: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {

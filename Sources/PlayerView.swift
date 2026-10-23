@@ -163,7 +163,6 @@ struct LessonPlayerView: View {
             pm.setupRemote()
             _ = pm.hostView
             pm.viewVisible = true
-            pm.onPiPStart = { dismiss() }
             let pipWasActive = pm.pip?.isPictureInPictureActive ?? false
             if pipWasActive { pm.pip?.stopPictureInPicture() }
             if pm.currentLessonID == lessonID, pm.player.currentItem != nil, startOverride == nil {
@@ -177,7 +176,7 @@ struct LessonPlayerView: View {
         .onDisappear {
             pm.viewVisible = false
             pm.onPiPStart = nil
-            if !(pm.pip?.isPictureInPictureActive ?? false) { pm.stop() }
+            if pm.pip?.isPictureInPictureActive ?? false { pm.parkHostView() } else { pm.stop() }
             hideTask?.cancel()
             sleepTask?.cancel()
             countTask?.cancel()
