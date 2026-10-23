@@ -405,7 +405,7 @@ struct SubjectView: View {
     }
 
     private func lessonButton(_ l: Lesson, isFirst: Bool, isLast: Bool) -> some View {
-        Button { playTarget = PlayTarget(id: l.id) } label: {
+        Button { if store.hasVideo(l) { playTarget = PlayTarget(id: l.id) } else { attachLesson = l; showAttach = true } } label: {
             HStack(spacing: 12) {
                 ZStack(alignment: .bottom) {
                     LessonThumb(url: store.url(for: l.fileName))
@@ -419,7 +419,7 @@ struct SubjectView: View {
                         }
                         .frame(height: 3)
                     }
-                    Image(systemName: l.isDone ? "checkmark.circle.fill" : "play.fill")
+                    Image(systemName: !store.hasVideo(l) ? "plus.circle.fill" : (l.isDone ? "checkmark.circle.fill" : "play.fill"))
                         .font(.system(size: l.isDone ? 20 : 15))
                         .foregroundColor(l.isDone ? .doneGreen : .white)
                         .shadow(radius: 4)
@@ -431,7 +431,9 @@ struct SubjectView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(l.title).font(.subheadline.weight(.semibold)).foregroundColor(.white)
                         .multilineTextAlignment(.leading).lineLimit(2)
-                    if l.duration > 0 {
+                    if !store.hasVideo(l) {
+                        Text("اضغط لإضافة الفيديو").font(.caption2).foregroundColor(.dim)
+                    } else if l.duration > 0 {
                         Text(l.isDone ? "مكتمل · \(formatTime(l.duration))" : (l.position > 1 ? "تابع من \(formatTime(l.position)) · \(formatTime(l.duration))" : formatTime(l.duration)))
                             .font(.caption2).foregroundColor(l.isDone ? .doneGreen : .dim)
                     }
