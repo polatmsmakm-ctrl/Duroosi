@@ -274,6 +274,43 @@ final class Store: ObservableObject {
         save()
     }
 
+
+    // MARK: seed curriculum
+    static let qadaratMath: [(String, [String])] = [
+        ("الأعداد الحقيقية", ["المقدمة","الاعداد والعمليات عليها","الكسور","الأسس الصحيحة","الجذور","الاعداد العشرية والعمليات عليها"]),
+        ("الحدوديات", ["الحدوديات والعمليات عليها","قسمة الحدوديات","قواعد التحليل","فصل المتغيرات","حل المعادلات","المعادلات من الدرجة الثانية","المعادلات من الدرجة الثانية متقدم","المميز والمربع الكامل","الحدوديات من الدرجة الثالثة"]),
+        ("المتباينات", ["خواص المتباينات","المتباينات الحلوة","المتباينات الا(نو) حلوة"]),
+        ("القيمة المطلقة", ["خواص القيم المطلقة وتمارينها","معادلات القيمة المطلقة","متباينات القيمة المطلقة"]),
+        ("الدوال الحقيقية", ["التعويض في الدوال","تركيب الدوال","مجال الدالة"]),
+        ("تطبيقات رياضية", ["تحويل الوحدات","المساحات","الحجوم","الأوزان"]),
+        ("تطبيقات حياتية", ["النسبة والتناسب","التغير الطردي والتغير العكسي","النسبة المئوية","ارتفاع وانخفاض النسبة المئوية"]),
+        ("استراتيجيات الحل والنمذجة", ["التقاطع والاتحاد في التطبيقات الحياتية","نفس العمل وعكس العمل","النمذجة","السرعة","تمارين متنوعة"]),
+        ("المنطق", ["مذكرة المنطق","العبارة","أدوات الربط","النفي","الاستقراء والاستنباط الرياضي"]),
+    ]
+    /// Creates the subject with chapters and placeholder lessons (no video yet).
+    @discardableResult
+    func seedQadaratMath() -> Subject {
+        let s = Subject(name: "قدرات - الرياضيات", colorIndex: 0, icon: "function")
+        subjects.append(s)
+        for (ut, names) in Store.qadaratMath {
+            let u = CourseUnit(subjectID: s.id, title: ut)
+            units.append(u)
+            for n in names {
+                lessons.append(Lesson(unitID: u.id, subjectID: s.id, title: n, fileName: "placeholder-\(UUID().uuidString).none"))
+            }
+        }
+        save(); return s
+    }
+    func hasVideo(_ l: Lesson) -> Bool { !l.fileName.hasSuffix(".none") }
+    /// Attaches a real video to a placeholder (or replaces the existing one).
+    func attachVideo(_ url: URL, to l: Lesson) async -> Bool {
+        let r = await Task.detached { () -> Result<String, Error> in Result { try Store.copyIn(url) } }.value
+        guard case .success(let name) = r, let i = lessons.firstIndex(where: { $0.id == l.id }) else { return false }
+        remove(lessons[i].fileName)
+        lessons[i].fileName = name; lessons[i].duration = 0; lessons[i].position = 0
+        save(); return true
+    }
+
     // MARK: units
     @discardableResult
     func addUnit(subjectID: UUID, title: String) -> CourseUnit {

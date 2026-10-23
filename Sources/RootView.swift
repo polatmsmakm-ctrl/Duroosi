@@ -408,6 +408,7 @@ struct ProgressTab: View {
 // MARK: - Settings
 
 struct SettingsTab: View {
+    @State private var seededMsg = false
     @EnvironmentObject var store: Store
     @AppStorage("reminderOn") private var reminderOn = false
     @AppStorage("reminderHour") private var hour = 18
@@ -546,6 +547,12 @@ struct SettingsTab: View {
                     } header: { Text("سجل الاستيراد (للتشخيص)") }
                     .listRowBackground(Color.cardBg)
 
+                    Section("منهج جاهز") {
+                        Button { _ = store.seedQadaratMath(); seededMsg = true } label: {
+                            Label(seededMsg ? "تمت الإضافة ✓ (شوفها في المواد)" : "إضافة «قدرات - الرياضيات»", systemImage: "square.and.arrow.down")
+                        }
+                    }
+                    .listRowBackground(Color.cardBg)
                     Section("المكتبة") {
                         LabeledContent("المواد", value: "\(store.subjects.count)")
                         LabeledContent("الفصول", value: "\(store.units.count)")

@@ -23,6 +23,8 @@ struct SubjectView: View {
     @State private var scrollTarget: UUID?
     @State private var bulkUnit: PlayTarget?
     @State private var showFolderImporter = false
+    @State private var showAttach = false
+    @State private var attachLesson: Lesson?
     @State private var reorderUnit: PlayTarget?
 
     @State private var showPhotos = false
@@ -94,6 +96,16 @@ struct SubjectView: View {
                 busy = false
                 expanded.insert(uid)
                 toastText = n > 0 ? "تمت إضافة \(n) درس ✓" : ("تعذّر: " + (store.lastImportError ?? "استيراد الفيديو"))
+            }
+        }
+        .documentPicker(isPresented: $showAttach,
+                        types: [.movie, .video, .mpeg4Movie, .quickTimeMovie], asCopy: true) { urls in
+            guard let l = attachLesson, let u = urls.first else { return }
+            Task {
+                busy = true
+                let ok = await store.attachVideo(u, to: l)
+                busy = false
+                toastText = ok ? "تم ربط الفيديو ✓" : "تعذّر ربط الفيديو"
             }
         }
         .documentPicker(isPresented: $showFolderImporter, types: [.folder], asCopy: false) { urls in
@@ -365,6 +377,9 @@ struct SubjectView: View {
             lessonButton(l, isFirst: isFirst, isLast: isLast)
             Menu {
                 Button { renameText = l.title; renameKind = .lesson(l) } label: { Label("تعديل العنوان", systemImage: "pencil") }
+                Button { attachLesson = l; showAttach = true } label: {
+                    Label(store.hasVideo(l) ? "استبدال الفيديو" : "ربط فيديو", systemImage: "film")
+                }
                 Button { store.toggleDone(l) } label: {
                     Label(l.isDone ? "إلغاء الإكمال" : "تعليم كمكتمل", systemImage: "checkmark.circle")
                 }
