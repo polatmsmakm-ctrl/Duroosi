@@ -9,7 +9,7 @@ struct LessonDrag: Codable, Transferable {
     }
 }
 
-private enum RenameKind { case newUnit(UUID), unit(CourseUnit), lesson(Lesson) }
+private enum RenameKind { case newUnit(UUID), newFolder(UUID), unit(CourseUnit), lesson(Lesson) }
 
 struct SubjectView: View {
     @EnvironmentObject var store: Store
@@ -264,6 +264,7 @@ struct SubjectView: View {
 
     private func unitCard(_ u: CourseUnit, number: Int) -> some View {
         let ls = store.lessons(in: u.id)
+        let fs = store.folders(in: u.id)
         let isOpen = expanded.contains(u.id)
         let p = store.progress(unit: u.id)
         let total = ls.reduce(0) { $0 + $1.duration }
@@ -281,7 +282,7 @@ struct SubjectView: View {
                             .background(p >= 0.95 ? AnyShapeStyle(Color.doneGreen) : AnyShapeStyle(Color.accentBlue), in: Circle())
                         VStack(alignment: .leading, spacing: 3) {
                             Text(u.title).font(.headline).foregroundColor(.white).multilineTextAlignment(.leading).lineLimit(2)
-                            Text(ls.isEmpty ? "فارغ" : "\(ls.count) فيديو" + (total > 0 ? " · \(formatTime(total))" : "") + " · \(Int(p * 100))%")
+                            Text(ls.isEmpty && fs.isEmpty ? "فارغ" : (fs.isEmpty ? "" : "\(fs.count) مجلد · ") + "\(store.allLessons(inChapter: u.id).count) فيديو" + (total > 0 ? " · \(formatTime(total))" : "") + " · \(Int(p * 100))%")
                                 .font(.caption).foregroundColor(.dim)
                         }
                         Spacer(minLength: 0)
@@ -294,6 +295,7 @@ struct SubjectView: View {
                 .buttonStyle(.plain)
 
                 Menu {
+                    Button { renameText = ""; renameKind = .newFolder(u.id) } label: { Label("إضافة مجلد فارغ", systemImage: "folder.badge.plus") }
                     Button { targetUnit = u.id; showPhotos = true } label: { Label("إضافة فيديو من الاستوديو", systemImage: "photo.on.rectangle") }
                     Button { targetUnit = u.id; showVideoImporter = true } label: { Label("إضافة فيديو من الملفات", systemImage: "folder") }
                     Button { targetUnit = u.id; showFolderImporter = true } label: { Label("إضافة مجلد كامل", systemImage: "folder.badge.plus") }
@@ -315,6 +317,7 @@ struct SubjectView: View {
             if isOpen {
                 VStack(spacing: 0) {
                     Divider().background(Color.white.opacity(0.1)).padding(.bottom, 6)
+                    ForEach(fs) { f in folderCard(f) }
                     ForEach(Array(ls.enumerated()), id: \.element.id) { idx, l in
                         lessonRow(l, isFirst: idx == 0, isLast: idx == ls.count - 1)
                     }
@@ -346,6 +349,74 @@ struct SubjectView: View {
             withAnimation { _ = expanded.insert(u.id) }
             haptic()
             return true
+        }
+    }
+
+    private func folderCard(_ f: CourseUnit) -> some View {
+        let ls = store.lessons(in: f.id)
+        let isOpen = expanded.contains(f.id)
+        return VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        if isOpen { expanded.remove(f.id) } else { expanded.insert(f.id) }
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: isOpen ? "folder.fill" : "folder")
+                            .font(.title3).foregroundColor(.accentBlue).frame(width: 30)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(f.title).font(.subheadline.bold()).foregroundColor(.white)
+                                .multilineTextAlignment(.leading).lineLimit(2)
+                            Text(ls.isEmpty ? "فارغ" : "\(ls.count) فيديو · \(Int(store.progress(unit: f.id) * 100))%")
+                                .font(.caption2).foregroundColor(.dim)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.down").font(.caption.bold()).foregroundColor(.dim)
+                            .rotationEffect(.degrees(isOpen ? 180 : 0))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Menu {
+                    Button { targetUnit = f.id; showPhotos = true } label: { Label("إضافة فيديو من الاستوديو", systemImage: "photo.on.rectangle") }
+                    Button { targetUnit = f.id; showVideoImporter = true } label: { Label("إضافة فيديو من الملفات", systemImage: "folder") }
+                    Button { targetUnit = f.id; showFolderImporter = true } label: { Label("إضافة مجلد كامل", systemImage: "folder.badge.plus") }
+                    Button { bulkUnit = PlayTarget(id: f.id) } label: { Label("تعديل عناوين الفيديوهات", systemImage: "text.badge.checkmark") }
+                    Button { reorderUnit = PlayTarget(id: f.id) } label: { Label("ترتيب الفيديوهات", systemImage: "arrow.up.arrow.down") }
+                    Divider()
+                    Button { renameText = f.title; renameKind = .unit(f) } label: { Label("تغيير اسم المجلد", systemImage: "pencil") }
+                    Button { store.moveUnit(f, by: -1) } label: { Label("نقل للأعلى", systemImage: "arrow.up") }
+                    Button { store.moveUnit(f, by: 1) } label: { Label("نقل للأسفل", systemImage: "arrow.down") }
+                    Button(role: .destructive) { unitToDelete = f } label: { Label("حذف المجلد", systemImage: "trash") }
+                } label: {
+                    Image(systemName: "ellipsis.circle.fill").font(.title3).foregroundColor(.accentBlue)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            if isOpen {
+                VStack(spacing: 0) {
+                    ForEach(Array(ls.enumerated()), id: \.element.id) { idx, l in
+                        lessonRow(l, isFirst: idx == 0, isLast: idx == ls.count - 1)
+                    }
+                    if ls.isEmpty {
+                        Button { targetUnit = f.id; showVideoImporter = true } label: {
+                            Label("إضافة فيديوهات", systemImage: "plus.circle.fill")
+                                .font(.footnote.bold()).foregroundColor(.accentBlue)
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12).padding(.bottom, 8)
+            }
+        }
+        .background(Color.cardBg2, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.vertical, 4)
+        .dropDestination(for: LessonDrag.self) { items, _ in
+            guard let d = items.first else { return false }
+            store.moveLesson(id: d.id, toUnit: f.id, before: nil)
+            withAnimation { _ = expanded.insert(f.id) }
+            haptic(); return true
         }
     }
 
@@ -405,7 +476,7 @@ struct SubjectView: View {
     }
 
     private func lessonButton(_ l: Lesson, isFirst: Bool, isLast: Bool) -> some View {
-        Button { if store.hasVideo(l) { playTarget = PlayTarget(id: l.id) } else { attachLesson = l; showAttach = true } } label: {
+        Button { playTarget = PlayTarget(id: l.id) } label: {
             HStack(spacing: 12) {
                 ZStack(alignment: .bottom) {
                     LessonThumb(url: store.url(for: l.fileName))
@@ -450,6 +521,7 @@ struct SubjectView: View {
     private var renameTitle: String {
         switch renameKind {
         case .newUnit: return "فصل جديد"
+        case .newFolder: return "مجلد جديد"
         case .unit: return "تغيير اسم الفصل"
         case .lesson: return "تغيير اسم الدرس"
         case nil: return ""
@@ -465,6 +537,8 @@ struct SubjectView: View {
             let u = store.addUnit(subjectID: sid, title: t)
             expanded.insert(u.id)
             scrollTarget = u.id
+        case .newFolder(let cid):
+            if let f = store.addFolder(chapterID: cid, title: t) { expanded.insert(cid); expanded.insert(f.id) }
         case .unit(let u): store.renameUnit(u, to: t)
         case .lesson(let l): store.renameLesson(l, to: t)
         }

@@ -11,6 +11,7 @@ struct CourseUnit: Identifiable, Codable, Hashable {
     var id = UUID()
     var subjectID: UUID
     var title: String
+    var parentID: UUID? = nil   // non-nil = folder inside a chapter
 }
 
 struct Lesson: Identifiable, Codable, Hashable {
@@ -170,6 +171,7 @@ final class Store: ObservableObject {
             lessonNotes = lib.lessonNotes ?? [:]; studyLog = lib.studyLog ?? [:]
             subjectPrefs = lib.subjectPrefs ?? [:]
             flashcards = lib.flashcards ?? []
+            migratePlaceholders()
             return
         }
         if let data = try? Data(contentsOf: oldURL),
@@ -193,6 +195,17 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Earlier build seeded empty placeholder lessons; turn them into folders.
+    private func migratePlaceholders() {
+        let ph = lessons.filter { $0.fileName.hasSuffix(".none") }
+        guard !ph.isEmpty else { return }
+        for l in ph {
+            units.append(CourseUnit(subjectID: l.subjectID, title: l.title, parentID: l.unitID))
+        }
+        lessons.removeAll { $0.fileName.hasSuffix(".none") }
+        save()
+    }
+
     func save() {
         let lib = Library(subjects: subjects, units: units, lessons: lessons, files: files, lastLessonID: lastLessonID,
                       bookmarks: bookmarks, questions: questions, lessonNotes: lessonNotes, studyLog: studyLog, subjectPrefs: subjectPrefs, flashcards: flashcards)
@@ -204,9 +217,11 @@ final class Store: ObservableObject {
 
     // MARK: queries
     func subject(_ id: UUID) -> Subject? { subjects.first { $0.id == id } }
-    func units(of sid: UUID) -> [CourseUnit] { units.filter { $0.subjectID == sid } }
+    func units(of sid: UUID) -> [CourseUnit] { units.filter { $0.subjectID == sid && $0.parentID == nil } }
+    func folders(in uid: UUID) -> [CourseUnit] { units.filter { $0.parentID == uid } }
+    func allLessons(inChapter uid: UUID) -> [Lesson] { lessons(in: uid) + folders(in: uid).flatMap { lessons(in: $0.id) } }
     func lessons(in uid: UUID) -> [Lesson] { lessons.filter { $0.unitID == uid } }
-    func orderedLessons(_ sid: UUID) -> [Lesson] { units(of: sid).flatMap { lessons(in: $0.id) } }
+    func orderedLessons(_ sid: UUID) -> [Lesson] { units(of: sid).flatMap { allLessons(inChapter: $0.id) } }
     func lesson(_ id: UUID) -> Lesson? { lessons.first { $0.id == id } }
     func unit(_ id: UUID) -> CourseUnit? { units.first { $0.id == id } }
     func notes(of sid: UUID) -> [FileAttachment] { files.filter { $0.subjectID == sid && $0.lessonID == nil } }
@@ -219,7 +234,7 @@ final class Store: ObservableObject {
         return ls.reduce(0) { $0 + $1.progress } / Double(ls.count)
     }
     func progress(unit uid: UUID) -> Double {
-        let ls = lessons(in: uid)
+        let ls = allLessons(inChapter: uid)
         guard !ls.isEmpty else { return 0 }
         return ls.reduce(0) { $0 + $1.progress } / Double(ls.count)
     }
@@ -295,9 +310,7 @@ final class Store: ObservableObject {
         for (ut, names) in Store.qadaratMath {
             let u = CourseUnit(subjectID: s.id, title: ut)
             units.append(u)
-            for n in names {
-                lessons.append(Lesson(unitID: u.id, subjectID: s.id, title: n, fileName: "placeholder-\(UUID().uuidString).none"))
-            }
+            for n in names { units.append(CourseUnit(subjectID: s.id, title: n, parentID: u.id)) }
         }
         save(); return s
     }
@@ -317,11 +330,18 @@ final class Store: ObservableObject {
         let u = CourseUnit(subjectID: subjectID, title: title)
         units.append(u); save(); return u
     }
+    @discardableResult
+    func addFolder(chapterID: UUID, title: String) -> CourseUnit? {
+        guard let c = unit(chapterID) else { return nil }
+        let u = CourseUnit(subjectID: c.subjectID, title: title, parentID: chapterID)
+        units.append(u); save(); return u
+    }
     func renameUnit(_ u: CourseUnit, to t: String) {
         guard let i = units.firstIndex(where: { $0.id == u.id }) else { return }
         units[i].title = t; save()
     }
     func deleteUnit(_ u: CourseUnit) {
+        folders(in: u.id).forEach { deleteUnit($0) }
         let ids = Set(lessons(in: u.id).map { $0.id })
         lessons(in: u.id).forEach { remove($0.fileName) }
         files.filter { $0.lessonID.map(ids.contains) ?? false }.forEach { remove($0.fileName) }
@@ -334,7 +354,7 @@ final class Store: ObservableObject {
         save()
     }
     func moveUnit(_ u: CourseUnit, by d: Int) {
-        let ids = units.indices.filter { units[$0].subjectID == u.subjectID }
+        let ids = units.indices.filter { units[$0].subjectID == u.subjectID && units[$0].parentID == u.parentID }
         guard let pos = ids.firstIndex(where: { units[$0].id == u.id }) else { return }
         let np = pos + d
         guard np >= 0, np < ids.count else { return }
