@@ -172,6 +172,7 @@ final class Store: ObservableObject {
             subjectPrefs = lib.subjectPrefs ?? [:]
             flashcards = lib.flashcards ?? []
             migratePlaceholders()
+            migrateExtras()
             return
         }
         if let data = try? Data(contentsOf: oldURL),
@@ -308,17 +309,39 @@ final class Store: ObservableObject {
         ("اسئلتكم السوبرية", ["الفصل الأول","الفصل الثاني","الفصل الثالث","الفصل الرابع","الفصل الخامس","الفصل السادس","الفصل السابع","الفصل الثامن","المنطق"]),
         ("المحاولات السابقة", ["اسئلتكم السوبرية - المحاولة الاولى","اسئلتكم السوبرية - المحاولة الثانية","اسئلتكم السوبرية - المحاولة الثالثة","اسئلتكم السوبرية - المحاولة الاولى - ٢٠٢٥","اسئلتكم السوبرية - المحاولة الثانية - ٢٠٢٥","اسئلتكم السوبرية - المحاولة الثالثة - ٢٠٢٥"]),
     ]
-    /// Adds the extra sections (زبدة / نماذج / السوبرية / المحاولات) as chapters with empty folders.
+    /// Each extra section is its own subject; its items are chapters.
     func seedQadaratExtras() {
-        let sub = subjects.first { $0.name == "قدرات - الرياضيات" } ?? {
-            let n = Subject(name: "قدرات - الرياضيات", colorIndex: 0, icon: "function"); subjects.append(n); return n }()
-        for (ut, names) in Store.qadaratExtras {
-            if units(of: sub.id).contains(where: { $0.title == ut }) { continue }
-            let u = CourseUnit(subjectID: sub.id, title: ut)
-            units.append(u)
-            for n in names { units.append(CourseUnit(subjectID: sub.id, title: n, parentID: u.id)) }
+        for (k, (name, items)) in Store.qadaratExtras.enumerated() {
+            if subjects.contains(where: { $0.name == name }) { continue }
+            let sub = Subject(name: name, colorIndex: k + 1, icon: "function")
+            subjects.append(sub)
+            for n in items { units.append(CourseUnit(subjectID: sub.id, title: n)) }
         }
         save()
+    }
+    /// Earlier build put the extras inside the main subject; move them out into their own subjects.
+    private func migrateExtras() {
+        guard let main = subjects.first(where: { $0.name == "قدرات - الرياضيات" }) else { return }
+        var changed = false
+        for (k, (name, _)) in Store.qadaratExtras.enumerated() {
+            guard let c = units.first(where: { $0.subjectID == main.id && $0.parentID == nil && $0.title == name }) else { continue }
+            changed = true
+            let sub = subjects.first(where: { $0.name == name }) ?? {
+                let n = Subject(name: name, colorIndex: k + 1, icon: "function"); subjects.append(n); return n }()
+            for i in units.indices where units[i].parentID == c.id {
+                let fid = units[i].id
+                units[i].parentID = nil; units[i].subjectID = sub.id
+                for j in lessons.indices where lessons[j].unitID == fid { lessons[j].subjectID = sub.id }
+            }
+            let direct = lessons.indices.filter { lessons[$0].unitID == c.id }
+            if !direct.isEmpty {
+                let g = CourseUnit(subjectID: sub.id, title: "دروس")
+                units.append(g)
+                for j in direct { lessons[j].unitID = g.id; lessons[j].subjectID = sub.id }
+            }
+            units.removeAll { $0.id == c.id }
+        }
+        if changed { save() }
     }
     /// Creates the subject with chapters and placeholder lessons (no video yet).
     @discardableResult

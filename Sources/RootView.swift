@@ -552,7 +552,7 @@ struct SettingsTab: View {
                             Label(seededMsg ? "تمت الإضافة ✓ (شوفها في المواد)" : "إضافة «قدرات - الرياضيات»", systemImage: "square.and.arrow.down")
                         }
                         Button { store.seedQadaratExtras(); seededMsg = true } label: {
-                            Label("إضافة: زبدة / نماذج اختبارات / السوبرية / المحاولات", systemImage: "plus.square.on.square")
+                            Label("إضافة مواد: زبدة / نماذج / السوبرية / المحاولات", systemImage: "plus.square.on.square")
                         }
                     }
                     .listRowBackground(Color.cardBg)
