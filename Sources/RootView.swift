@@ -558,7 +558,7 @@ struct SettingsTab: View {
                     .listRowBackground(Color.cardBg)
                     Section("المكتبة") {
                         LabeledContent("المواد", value: "\(store.subjects.count)")
-                        LabeledContent("الفصول", value: "\(store.units.count)")
+                        LabeledContent("الفصول", value: "\(store.units.filter { $0.parentID == nil }.count)")
                         LabeledContent("الفيديوهات", value: "\(store.lessons.count)")
                         LabeledContent("الملفات المرفقة", value: "\(store.files.count)")
                         LabeledContent("المساحة المستخدمة", value: storageText)

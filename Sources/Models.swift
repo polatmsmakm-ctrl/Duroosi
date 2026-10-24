@@ -346,6 +346,7 @@ final class Store: ObservableObject {
     /// Creates the subject with chapters and placeholder lessons (no video yet).
     @discardableResult
     func seedQadaratMath() -> Subject {
+        if let ex = subjects.first(where: { $0.name == "قدرات - الرياضيات" }) { return ex }
         let s = Subject(name: "قدرات - الرياضيات", colorIndex: 0, icon: "function")
         subjects.append(s)
         for (ut, names) in Store.qadaratMath {
