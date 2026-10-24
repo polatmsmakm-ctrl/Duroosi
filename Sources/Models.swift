@@ -520,11 +520,24 @@ final class Store: ObservableObject {
 
     nonisolated static let videoExts: Set<String> = ["mp4", "mov", "m4v", "3gp", "mpg", "mpeg"]
 
+    /// أول رقم في الاسم (يدعم الأرقام العربية)، للترتيب 1، 2، 3 … مهما كان العدد.
+    nonisolated static func numberIn(_ name: String) -> Int? {
+        var digits = ""
+        for ch in name {
+            if let d = ch.wholeNumberValue, ch.isNumber, d >= 0, d <= 9 { digits.append(String(d)) }
+            else if !digits.isEmpty { break }
+        }
+        return digits.isEmpty ? nil : Int(digits.prefix(9))
+    }
+    nonisolated static func fileOrder(_ a: URL, _ b: URL) -> Bool {
+        let an = a.deletingPathExtension().lastPathComponent, bn = b.deletingPathExtension().lastPathComponent
+        if let x = numberIn(an), let y = numberIn(bn), x != y { return x < y }
+        return a.path.localizedStandardCompare(b.path) == .orderedAscending
+    }
+
     nonisolated static func scanFolder(_ folder: URL) -> [(String, [URL])] {
         let fm = FileManager.default
-        func natural(_ a: URL, _ b: URL) -> Bool {
-            a.path.localizedStandardCompare(b.path) == .orderedAscending
-        }
+        func natural(_ a: URL, _ b: URL) -> Bool { Store.fileOrder(a, b) }
         func videos(in dir: URL) -> [URL] {
             guard let en = fm.enumerator(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
             var out: [URL] = []
@@ -532,7 +545,7 @@ final class Store: ObservableObject {
             return out.sorted(by: natural)
         }
         let items = ((try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? [])
-            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            .sorted { Store.fileOrder($0, $1) }
         var result: [(String, [URL])] = []
         let rootVids = items.filter { videoExts.contains($0.pathExtension.lowercased()) }
         if !rootVids.isEmpty { result.append((folder.lastPathComponent, rootVids)) }
@@ -614,6 +627,7 @@ final class Store: ObservableObject {
         guard let u = unit(unitID) else { return 0 }
         var count = 0
         defer { importStatus = nil }
+        let urls = urls.sorted { Store.fileOrder($0, $1) }
         for (idx, url) in urls.enumerated() {
             importStatus = "جاري استيراد \(idx + 1) من \(urls.count)…"
             var title = url.deletingPathExtension().lastPathComponent
