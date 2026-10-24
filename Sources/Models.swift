@@ -84,12 +84,12 @@ struct FileAttachment: Identifiable, Codable, Hashable {
 
 enum Palette {
     static let gradients: [[Color]] = [
-        [Color(red: 0.95, green: 0.62, blue: 0.24), Color(red: 0.70, green: 0.34, blue: 0.12)],
-        [Color(red: 0.98, green: 0.45, blue: 0.40), Color(red: 0.95, green: 0.25, blue: 0.50)],
-        [Color(red: 0.15, green: 0.75, blue: 0.60), Color(red: 0.10, green: 0.55, blue: 0.75)],
-        [Color(red: 1.00, green: 0.70, blue: 0.20), Color(red: 0.95, green: 0.45, blue: 0.15)],
-        [Color(red: 0.30, green: 0.80, blue: 0.95), Color(red: 0.25, green: 0.50, blue: 0.95)],
-        [Color(red: 0.60, green: 0.85, blue: 0.35), Color(red: 0.20, green: 0.65, blue: 0.40)]
+        [Color(red: 0.62, green: 0.46, blue: 0.27), Color(red: 0.37, green: 0.26, blue: 0.16)],
+        [Color(red: 0.55, green: 0.33, blue: 0.38), Color(red: 0.33, green: 0.19, blue: 0.27)],
+        [Color(red: 0.24, green: 0.48, blue: 0.50), Color(red: 0.15, green: 0.29, blue: 0.38)],
+        [Color(red: 0.58, green: 0.50, blue: 0.32), Color(red: 0.36, green: 0.29, blue: 0.19)],
+        [Color(red: 0.30, green: 0.45, blue: 0.62), Color(red: 0.18, green: 0.26, blue: 0.43)],
+        [Color(red: 0.38, green: 0.52, blue: 0.40), Color(red: 0.21, green: 0.32, blue: 0.29)]
     ]
     static func colors(_ i: Int) -> [Color] { gradients[((i % gradients.count) + gradients.count) % gradients.count] }
     static func gradient(_ i: Int) -> LinearGradient {
